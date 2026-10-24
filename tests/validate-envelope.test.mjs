@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { validateEnvelope } from '../tools/validate-envelope.mjs';
+const good = () => ({schemaVersion:1,eventId:'event-synthetic-1',type:'qq.message.observed',personaId:'persona-test',sceneId:'scene-test',occurredAt:'2026-10-25T00:00:00Z',observedAt:'2026-10-25T00:00:01Z',sourceRef:'source-test',dataScopeRef:'scope-test'});
+test('accepts required reference-only envelope',()=>assert.deepEqual(validateEnvelope(good()),[]));
+test('accepts optional references',()=>assert.deepEqual(validateEnvelope({...good(),payloadRef:'payload-test',correlationId:'corr-test',causationId:'cause-test'}),[]));
+test('all four documented event types are accepted',()=>{for(const type of ['qq.message.observed','qq.delivery.updated','qq.scene.activity.changed','activity.status.changed'])assert.deepEqual(validateEnvelope({...good(),type}),[])});
+test('rejects non-object envelopes',()=>{for(const v of [null,[],false,1,'x'])assert.ok(validateEnvelope(v).length)});
+test('rejects unsupported schema versions',()=>{for(const v of [undefined,0,2,'1'])assert.ok(validateEnvelope({...good(),schemaVersion:v}).length)});
+test('every required string is required and nonblank',()=>{for(const key of ['eventId','type','personaId','sceneId','occurredAt','observedAt','sourceRef','dataScopeRef']){for(const value of [undefined,null,3,'','  '])assert.ok(validateEnvelope({...good(),[key]:value}).length,key)}});
+test('rejects unrecognized type',()=>assert.ok(validateEnvelope({...good(),type:'qq.mark_read'}).length));
+test('rejects raw inline content and unknown fields',()=>{for(const key of ['text','token','payload','authorization','futureScope'])assert.ok(validateEnvelope({...good(),[key]:'synthetic'}).length,key)});
+test('optional references must be nonblank strings when present',()=>{for(const key of ['payloadRef','correlationId','causationId'])for(const value of [null,1,'','  ',undefined])assert.ok(validateEnvelope({...good(),[key]:value}).length,key)});
+test('timestamps require real UTC calendar dates',()=>{for(const value of ['tomorrow','2026-02-30T00:00:00Z','2026-13-01T00:00:00Z','2026-10-25','2026-10-25T00:00:00+08:00'])for(const key of ['occurredAt','observedAt'])assert.ok(validateEnvelope({...good(),[key]:value}).length,value)});
+test('does not mutate input and has deterministic errors',()=>{const v=Object.freeze({...good(),schemaVersion:2});const a=validateEnvelope(v);assert.deepEqual(a,validateEnvelope(v));assert.ok(a.every(x=>typeof x==='string'))});
+test('malformed scope is rejected; authorization is outside this demo',()=>assert.ok(validateEnvelope({...good(),dataScopeRef:{public:true}}).length));

@@ -1,6 +1,12 @@
 # amadeus-qq 交接
 
-记录日期：2026-10-24（Asia/Shanghai）。
+更新日期：2026-10-25（Asia/Shanghai）。M0 部分完成。
+
+## M0 最新入口
+
+见 docs/m0/BASELINE.md 和 docs/contracts/qq-life-v0.1.md。已核实当前 DSH、bridge 与 SnowLuma，保存脱敏历史工具轨迹；独立无头 NapCat 未确认，未改动生产。
+
+本仓库 tools/validate-envelope.mjs 为独立 DSH worker 经过同会话返工、Codex 审查验收的演示代码；不实现鉴权或消息队列。运行 node --test tests/validate-envelope.test.mjs tests/continuous-trace.test.mjs，本轮 16/16 通过。旧桥隔离等待回归另有 10/10；均不能代替新 NapCat 真实链路验收。
 
 ## 仓库
 
@@ -30,8 +36,8 @@ QQ 交互以现用 bridge 的黑盒体验为基准，允许修改或重写。仅
 
 ## 未运行与限制
 
-- 未实施插件代码、构建、安装、升级、卸载或发布流程。
-- 未验证实际 DSH、QQ、NapCat、设备或其他平台兼容性。
+- 已有事件形状演示校验器；未实施生产插件、构建、安装、升级、卸载或发布流程。
+- DSH 与现用 bridge / SnowLuma 版本已核实，未验证独立 NapCat 和新插件的实际平台兼容性。
 - 未运行本插件功能、契约、降级、权限或集成验收。
 - 当前无契约兼容版本、release 或可安装依赖组合。
 - 本仓库许可证未确定；任何第三方复用均须单独核查。
