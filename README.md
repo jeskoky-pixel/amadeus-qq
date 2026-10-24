@@ -4,7 +4,7 @@
 
 **当前状态：M0 基线与契约演示。已有脱敏历史轨迹及事件形状校验器，无可安装生产插件，独立 NapCat 联调未完成。**
 
-项目入口：[Amadeus-dsh](https://github.com/jeskoky-pixel/Amadeus-dsh)。开发顺序：P0。当前仓库为私有。
+项目入口：[Amadeus-dsh](https://github.com/jeskoky-pixel/Amadeus-dsh)。开发顺序：P0。当前仓库已于 2026-10-25 根据用户要求公开，便于网页端审阅。
 
 ## 职责与边界
 
