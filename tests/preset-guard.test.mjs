@@ -10,6 +10,7 @@ import {
   resolveQQPermissionPolicy,
   toolsForLevel,
 } from '../src/preset-guard.mjs'
+import { OWNER_WORKSPACE_CAPABILITY, OWNER_WORKSPACE_TOOL, providerStatus, resetProviderStatus } from '../src/owner-workspace.js'
 
 function fakeHost(initialSchemas, { restrictError = false } = {}) {
   const state = {
@@ -24,6 +25,10 @@ function fakeHost(initialSchemas, { restrictError = false } = {}) {
     tools: {
       guard(fn) {
         state.guards.push(fn)
+        return () => {}
+      },
+      register(definition) {
+        state.schemas = [...state.schemas, { name: definition.name }]
         return () => {}
       },
       restrict(filter) {
@@ -90,16 +95,25 @@ test('image reader is visible only in the enhanced QQ preset', () => {
   assert.match(enhanced.state.guards[0]({ name: 'pwsh' }), /non-QQ tools/)
 })
 
-test('record transcription is visible only in the enhanced QQ preset', () => {
+test('record transcription is visible in Safe Chat only for native PTT; local ASR stays Enhanced', () => {
   const basic = fakeHost([...QQ_TOOL_NAMES, 'pwsh'])
   apply(basic.ctx, { level: 1 })
   assert.match(basic.state.guards[0]({ name: 'qq_transcribe_message_record' }), /permission level 1/)
   assert.equal(basic.state.restrictions.find(filter => filter.allow).allow.includes('qq_transcribe_message_record'), false)
+  assert.equal(basic.state.guards[0]({ name: 'qq_transcribe_message_record_native' }), undefined)
+  assert.equal(basic.state.restrictions.find(filter => filter.allow).allow.includes('qq_transcribe_message_record_native'), true)
+
+  const observe = fakeHost([...QQ_TOOL_NAMES, 'pwsh'])
+  apply(observe.ctx, { level: 0 })
+  assert.match(observe.state.guards[0]({ name: 'qq_transcribe_message_record_native' }), /permission level 0/)
+  assert.equal(observe.state.restrictions.find(filter => filter.allow).allow.includes('qq_transcribe_message_record_native'), false)
 
   const enhanced = fakeHost([...QQ_TOOL_NAMES, 'pwsh'])
   apply(enhanced.ctx, { level: 2 })
-  assert.equal(enhanced.state.guards[0]({ name: 'qq_transcribe_message_record' }), undefined)
-  assert.equal(enhanced.state.restrictions.find(filter => filter.allow).allow.includes('qq_transcribe_message_record'), true)
+  for (const name of ['qq_transcribe_message_record', 'qq_transcribe_message_record_native']) {
+    assert.equal(enhanced.state.guards[0]({ name }), undefined)
+    assert.equal(enhanced.state.restrictions.find(filter => filter.allow).allow.includes(name), true)
+  }
   assert.match(enhanced.state.guards[0]({ name: 'pwsh' }), /non-QQ tools/)
 })
 
@@ -179,4 +193,160 @@ test('a failed visible restriction does not weaken the execution guard', () => {
   apply(ctx, { level: 1 })
   assert.equal(state.restrictions.length, 0)
   assert.match(state.guards[0]({ name: 'pwsh' }), /non-QQ tools/)
+})
+
+function withCapabilities(host, capabilities) {
+  host.ctx.get = name => name === 'qq'
+    ? { authorizeSessionCapability: (_sessionId, capability) => capabilities.has(capability) }
+    : undefined
+  return host
+}
+
+const exec = (name, args = {}) => ({ name, arguments: args, agent: { session: { id: 'bound' } } })
+
+test('Safe Chat cannot execute media, file, QZone or Owner workspace tools', () => {
+  const { ctx, state } = withCapabilities(fakeHost([
+    'qq_send_media', 'qq_upload_file', 'qq_qzone', 'qq_account_profile', OWNER_WORKSPACE_TOOL,
+  ]), new Set(['qq.send', 'qq.qzone.publish', 'qq.qzone.read', OWNER_WORKSPACE_CAPABILITY]))
+  apply(ctx, { level: 1 })
+  const guard = state.guards[0]
+  for (const name of ['qq_send_media', 'qq_upload_file', 'qq_qzone', 'qq_account_profile', OWNER_WORKSPACE_TOOL]) {
+    assert.match(guard(exec(name)), /does not allow|not configured/, name)
+  }
+})
+
+test('account profile is Owner-only and checks the operation permission', () => {
+  const owner = withCapabilities(fakeHost(['qq_account_profile']), new Set(['qq.read', 'qq.profile.write']))
+  apply(owner.ctx, { level: 4 })
+  const guard = owner.state.guards[0]
+  assert.equal(guard(exec('qq_account_profile', { op: 'read' })), undefined)
+  assert.equal(guard(exec('qq_account_profile', { op: 'set_signature' })), undefined)
+  assert.equal(guard(exec('qq_account_profile', { op: 'set_avatar' })), undefined)
+  assert.match(guard(exec('qq_account_profile', { op: 'other' })), /operation is not allowed/)
+
+  const readOnly = withCapabilities(fakeHost(['qq_account_profile']), new Set(['qq.read']))
+  apply(readOnly.ctx, { level: 4 })
+  assert.match(readOnly.state.guards[0](exec('qq_account_profile', { op: 'set_nickname' })), /permission denied/)
+
+  const lower = withCapabilities(fakeHost(['qq_account_profile']), new Set(['qq.read', 'qq.profile.write']))
+  apply(lower.ctx, { level: 3 })
+  assert.match(lower.state.guards[0](exec('qq_account_profile', { op: 'read' })), /does not allow/)
+})
+
+test('media/file tools need level 2, a registered send root and runtime qq.send', () => {
+  const registered = withCapabilities(fakeHost(['qq_send_media', 'qq_upload_file']), new Set(['qq.send']))
+  apply(registered.ctx, { level: 2 })
+  assert.equal(registered.state.guards[0](exec('qq_send_media')), undefined)
+  assert.equal(registered.state.guards[0](exec('qq_upload_file')), undefined)
+
+  const noPermission = withCapabilities(fakeHost(['qq_send_media']), new Set())
+  apply(noPermission.ctx, { level: 2 })
+  assert.match(noPermission.state.guards[0](exec('qq_send_media')), /send permission denied/)
+
+  const notConfigured = withCapabilities(fakeHost([]), new Set(['qq.send']))
+  apply(notConfigured.ctx, { level: 2 })
+  assert.match(notConfigured.state.guards[0](exec('qq_send_media')), /send root is not configured/)
+})
+
+test('QZone is level 3+, requires the provider and per-operation capability', () => {
+  const unified = withCapabilities(fakeHost(['qq_qzone']), new Set(['qq.qzone.use']))
+  apply(unified.ctx, { level: 3 })
+  assert.equal(unified.state.guards[0](exec('qq_qzone', { op: 'own_posts' })), undefined)
+  assert.equal(unified.state.guards[0](exec('qq_qzone', { op: 'publish_text' })), undefined)
+  assert.equal(unified.state.guards[0](exec('qq_qzone', { op: 'publish_media' })), undefined)
+  const write = withCapabilities(fakeHost(['qq_qzone']), new Set(['qq.qzone.publish']))
+  apply(write.ctx, { level: 3 })
+  assert.equal(write.state.guards[0](exec('qq_qzone', { op: 'publish_text' })), undefined)
+  assert.match(write.state.guards[0](exec('qq_qzone', { op: 'own_posts' })), /QZone permission denied/)
+  assert.match(write.state.guards[0](exec('qq_qzone', { op: 'unknown' })), /operation is not allowed/)
+
+  const level2 = withCapabilities(fakeHost(['qq_qzone']), new Set(['qq.qzone.publish']))
+  apply(level2.ctx, { level: 2 })
+  assert.match(level2.state.guards[0](exec('qq_qzone', { op: 'publish_text' })), /does not allow/)
+
+  const read = withCapabilities(fakeHost(['qq_qzone']), new Set(['qq.qzone.read']))
+  apply(read.ctx, { level: 3 })
+  assert.equal(read.state.guards[0](exec('qq_qzone', { op: 'own_posts' })), undefined)
+
+  const noProvider = withCapabilities(fakeHost([]), new Set(['qq.qzone.publish']))
+  apply(noProvider.ctx, { level: 3 })
+  assert.match(noProvider.state.guards[0](exec('qq_qzone', { op: 'publish_text' })), /provider is not configured/)
+})
+
+test('Owner workspace is allowlisted only at level 4 and still needs the dedicated capability', () => {
+  resetProviderStatus()
+  // The connector registers the tool with the live config; the guard only
+  // allowlists it. A static preset-row root must have no effect.
+  const host = withCapabilities(fakeHost([OWNER_WORKSPACE_TOOL]), new Set([OWNER_WORKSPACE_CAPABILITY]))
+  apply(host.ctx, { level: 4, ownerWorkspaceRoot: process.cwd(), ownerWorkspaceWrites: true })
+  assert.equal(host.state.guards[0](exec(OWNER_WORKSPACE_TOOL, { op: 'read' })), undefined)
+  assert.equal(host.ctx.tools.schemas().length, 1, 'guard does not register a duplicate')
+
+  const noCapability = withCapabilities(fakeHost([OWNER_WORKSPACE_TOOL]), new Set())
+  apply(noCapability.ctx, { level: 4 })
+  assert.match(noCapability.state.guards[0](exec(OWNER_WORKSPACE_TOOL)), /permission denied/)
+
+  const level3 = withCapabilities(fakeHost([OWNER_WORKSPACE_TOOL]), new Set([OWNER_WORKSPACE_CAPABILITY]))
+  apply(level3.ctx, { level: 3 })
+  assert.match(level3.state.guards[0](exec(OWNER_WORKSPACE_TOOL)), /does not allow/)
+
+  const notRegistered = withCapabilities(fakeHost([]), new Set([OWNER_WORKSPACE_CAPABILITY]))
+  apply(notRegistered.ctx, { level: 4 })
+  assert.match(notRegistered.state.guards[0](exec(OWNER_WORKSPACE_TOOL)), /not registered/)
+})
+
+test('registered DSH tools are visible and executable only for a verified level-4 Owner Session', () => {
+  const { ctx, state } = fakeHost([...QQ_TOOL_NAMES, 'pwsh', 'read', 'write', 'glob', 'grep', 'web_search', 'web_fetch', 'memory_search', 'github_search'])
+  let owner = true
+  ctx.get = name => name === 'qq'
+    ? {
+      resolveTrustedSessionScene: () => ({ admin: owner }),
+      authorizeSessionCapability: (_id, capability) => capability === 'qq.owner.tools',
+    }
+    : undefined
+  apply(ctx, { level: 4 })
+  const exec = name => ({ name, agent: { session: { id: 'owner-session' } } })
+  for (const name of ['pwsh', 'read', 'write', 'glob', 'grep', 'web_fetch', 'web_search', 'memory_search', 'github_search']) {
+    assert.equal(state.guards[0](exec(name)), undefined, name)
+  }
+  assert.match(state.guards[0](exec('not_installed')), /non-QQ tools/)
+  assert.match(state.guards[0](exec('qq_unlisted_send')), /non-QQ tools/)
+  const allow = state.restrictions.find(filter => filter.allow)?.allow ?? []
+  for (const name of ['pwsh', 'read', 'write', 'glob', 'grep', 'web_fetch', 'web_search', 'memory_search', 'github_search']) {
+    assert.ok(allow.includes(name), `${name} must be visible`)
+  }
+  state.schemas.push({ name: 'github_issue_create' })
+  state.listeners.get('tools/change')()
+  assert.ok(state.restrictions.filter(filter => filter.allow).at(-1).allow.includes('github_issue_create'))
+  assert.equal(state.guards[0](exec('github_issue_create')), undefined)
+  owner = false
+  assert.match(state.guards[0](exec('pwsh')), /owner native|non-QQ/i)
+  assert.match(state.guards[0](exec('github_issue_create')), /owner native|non-QQ/i)
+  apply(fakeHost([...QQ_TOOL_NAMES, 'pwsh']).ctx, { level: 1 })
+})
+
+test('provider status reflects the live tool registry, not the preset level', () => {
+  resetProviderStatus()
+  const { ctx, state } = fakeHost(['qq_send_media', 'qq_upload_file'])
+  apply(ctx, { level: 1 })
+  assert.deepEqual(providerStatus().mediaSend, { installed: true, configured: true, enabled: true })
+  assert.equal(providerStatus().qzone.installed, false)
+  state.schemas = [...state.schemas, { name: 'qq_qzone' }]
+  state.listeners.get('tools/change')()
+  assert.equal(providerStatus().qzone.installed, true)
+  resetProviderStatus()
+})
+
+test('registered Owner workspace appears in the level 4 visible tool mask', () => {
+  const owner = fakeHost([...QQ_TOOL_NAMES, OWNER_WORKSPACE_TOOL])
+  apply(owner.ctx, { level: 4 })
+  assert.equal(owner.state.restrictions.find(filter => filter.allow)?.allow.includes(OWNER_WORKSPACE_TOOL), true)
+
+  const unconfigured = fakeHost([...QQ_TOOL_NAMES])
+  apply(unconfigured.ctx, { level: 4 })
+  assert.equal(unconfigured.state.restrictions.find(filter => filter.allow)?.allow.includes(OWNER_WORKSPACE_TOOL), false)
+
+  const lower = fakeHost([...QQ_TOOL_NAMES, OWNER_WORKSPACE_TOOL])
+  apply(lower.ctx, { level: 3 })
+  assert.equal(lower.state.restrictions.find(filter => filter.allow)?.allow.includes(OWNER_WORKSPACE_TOOL), false)
 })

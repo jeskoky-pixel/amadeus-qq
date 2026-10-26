@@ -1,4 +1,5 @@
-import { normalizeId, normalizeMessageId } from './storage.js'
+import { createHash } from 'node:crypto'
+import { normalizeId, normalizeMessageId, sceneKey } from './storage.js'
 import { sanitizeInboundSegments } from './onebot.js'
 import { NAPCAT_ACTION_NAMES } from './napcat-action-names.js'
 
@@ -22,6 +23,16 @@ const PAGING = Object.freeze({
 })
 const MAX_RESULT_CHARS = 64_000
 const MAX_GROUP_READ_RESPONSE_BYTES = 128 * 1024
+const ACTION_ID = Object.freeze({ type: 'string' })
+
+function writeParameters(properties, required = []) {
+  return Object.freeze({
+    type: 'object',
+    additionalProperties: false,
+    properties: Object.freeze({ actionId: ACTION_ID, ...properties }),
+    required: Object.freeze(['actionId', ...required]),
+  })
+}
 const DEFAULT_PAGE_LIMIT = 50
 
 function parsePaging(args) {
@@ -227,6 +238,43 @@ function projectHonor(data, expected) {
   return projected
 }
 
+function projectNoticeItem(data) {
+  const source = projectionObject(data)
+  const projected = {}
+  const noticeId = projectString(source.notice_id, 100)
+  if (noticeId !== undefined) projected.notice_id = noticeId
+  if (source.sender_id !== undefined) projected.sender_id = projectId(source.sender_id)
+  if (Number.isSafeInteger(source.publish_time)) projected.publish_time = source.publish_time
+  if (typeof source.read_num === 'number' && Number.isSafeInteger(source.read_num) && source.read_num >= 0) {
+    projected.read_num = source.read_num
+  }
+  if (typeof source.send_to_new_member === 'boolean') projected.send_to_new_member = source.send_to_new_member
+  if (typeof source.pinned === 'boolean') projected.pinned = source.pinned
+  if (source.message !== null && typeof source.message === 'object' && !Array.isArray(source.message)) {
+    const text = projectString(source.message.text, 500)
+    if (text !== undefined) projected.text = text
+  }
+  return projected
+}
+
+function pageNotices(data) {
+  if (!Array.isArray(data)) throw invalidResponse()
+  const items = data.slice(0, 50).map(projectNoticeItem)
+  return { items, total: data.length, partial: data.length > 50 }
+}
+
+function requireObservedMessage(store, scene, rawId) {
+  let id
+  try { id = normalizeMessageId(rawId, 'messageId') } catch { throw invalidResponse() }
+  const row = store.getScene(scene)
+  if (!row?.messages?.some(message => message.messageId === id)) throw new Error('QQ_MESSAGE_SCOPE')
+  return id
+}
+
+function requireStableUserId(rawId) {
+  try { return normalizeId(rawId, 'userId') } catch { throw new TypeError('invalid userId') }
+}
+
 /**
  * `get_msg` is the only capability that returns a platform message body. Build
  * an explicit whitelist so `raw_message`, CQ strings, media URLs/paths and
@@ -380,6 +428,177 @@ const EXECUTABLE = new Map([
       if (scene.kind !== 'group') throw new Error('QQ_GROUP_ONLY')
       return { group_id: scene.peerId, type: 'all' }
     } }],
+  ['qq.get_group_notice', { action: '_get_group_notice', category: 'group', risk: 'low',
+    description: 'Read this Session’s group notices without retaining images or platform URLs.',
+    parameters: EMPTY,
+    project: pageNotices,
+    precheckRaw: true,
+    execute: (_args, scene) => {
+      if (scene.kind !== 'group') throw new Error('QQ_GROUP_ONLY')
+      return { group_id: scene.peerId }
+    } }],
+  ['qq.set_msg_emoji_like', { action: 'set_msg_emoji_like', category: 'message', risk: 'medium',
+    write: true, requiredCapability: 'qq.reaction.write',
+    description: 'Set one emoji reaction on a message observed in this bound Scene.',
+    parameters: writeParameters({
+      messageId: { type: 'string' },
+      emojiId: { type: 'string' },
+    }, ['messageId', 'emojiId']),
+    execute: (args, scene, { store }) => {
+      if (!/^[1-9]\d{0,11}$/.test(args.emojiId)) throw new TypeError('invalid emojiId')
+      return { message_id: requireObservedMessage(store, scene, args.messageId), emoji_id: args.emojiId, set: true }
+    } }],
+  ['qq.send_poke', { action: 'send_poke', category: 'social', risk: 'medium',
+    write: true, requiredCapability: 'qq.poke',
+    description: 'Poke one user already observed in this bound Scene.',
+    parameters: writeParameters({ userId: { type: 'string' } }, ['userId']),
+    execute: (args, scene, { store }) => {
+      const userId = projectId(args.userId)
+      const observed = scene.kind === 'private'
+        ? userId === scene.peerId
+        : store.getScene(scene)?.messages?.some(message => message.senderId === userId)
+      if (!observed) throw new Error('QQ_PERSON_SCOPE')
+      return scene.kind === 'group'
+        ? { group_id: scene.peerId, user_id: userId, target_id: userId }
+        : { user_id: userId, target_id: userId }
+    } }],
+  ['qq.delete_msg', { action: 'delete_msg', category: 'message', risk: 'medium',
+    write: true, requiredCapability: 'qq.recall',
+    description: 'Recall one message this bot delivered in the bound Scene.',
+    parameters: writeParameters({ messageId: { type: 'string' } }, ['messageId']),
+    execute: (args, scene, { store }) => {
+      let messageId
+      try { messageId = normalizeMessageId(args.messageId, 'messageId') } catch { throw invalidResponse() }
+      const row = store.getScene(scene)
+      const own = [...row.deliveries, ...(row.deliveryArchive ?? [])]
+        .some(item => item.status === 'delivered' && item.platformMessageId === messageId)
+      if (!own) throw new Error('QQ_RECALL_SCOPE')
+      return { message_id: messageId }
+    } }],
+  ['qq.set_essence_msg', { action: 'set_essence_msg', category: 'group', risk: 'medium',
+    write: true, requiredCapability: 'qq.group.essence',
+    description: 'Mark one observed group message as an essence message.',
+    parameters: writeParameters({ messageId: { type: 'string' } }, ['messageId']),
+    execute: (args, scene, { store }) => {
+      if (scene.kind !== 'group') throw new Error('QQ_GROUP_ONLY')
+      return { message_id: requireObservedMessage(store, scene, args.messageId) }
+    } }],
+  ['qq.delete_essence_msg', { action: 'delete_essence_msg', category: 'group', risk: 'medium',
+    write: true, requiredCapability: 'qq.group.essence',
+    description: 'Remove one observed group message from the essence list.',
+    parameters: writeParameters({ messageId: { type: 'string' } }, ['messageId']),
+    execute: (args, scene, { store }) => {
+      if (scene.kind !== 'group') throw new Error('QQ_GROUP_ONLY')
+      return { message_id: requireObservedMessage(store, scene, args.messageId) }
+    } }],
+  ['qq.set_group_card', { action: 'set_group_card', category: 'group', risk: 'medium',
+    write: true, requiredCapability: 'qq.group.card',
+    description: 'Set this bot’s group card in the bound group only.',
+    parameters: writeParameters({ card: { type: 'string' } }, ['card']),
+    execute: (args, scene) => {
+      if (scene.kind !== 'group') throw new Error('QQ_GROUP_ONLY')
+      if (typeof args.card !== 'string' || args.card.length > 30 || /[\u0000-\u001f\u007f]/.test(args.card)) {
+        throw new TypeError('invalid group card')
+      }
+      return { group_id: scene.peerId, user_id: scene.botId, card: args.card }
+    } }],
+  ['qq.send_group_notice', { action: '_send_group_notice', category: 'group', risk: 'medium',
+    write: true, requiredCapability: 'qq.group.notice',
+    description: 'Publish a text-only group notice in the bound group; images and paths are not accepted.',
+    parameters: writeParameters({
+      content: { type: 'string' },
+      pinned: { type: 'boolean' },
+    }, ['content']),
+    execute: (args, scene) => {
+      if (scene.kind !== 'group') throw new Error('QQ_GROUP_ONLY')
+      if (typeof args.content !== 'string' || args.content.trim().length === 0 ||
+        args.content.length > 500 || /[\u0000-\u001f\u007f]/.test(args.content)) {
+        throw new TypeError('invalid group notice content')
+      }
+      return {
+        group_id: scene.peerId,
+        content: args.content,
+        pinned: args.pinned === true ? 1 : 0,
+        type: 1,
+        confirm_required: 1,
+        is_show_edit_card: 0,
+        tip_window_type: 0,
+      }
+    } }],
+  ['qq.set_group_ban', { action: 'set_group_ban', category: 'group', risk: 'high',
+    write: true, requiredCapability: 'qq.group.ban', memberPreflight: true,
+    description: 'Mute one observed member in the bound group; duration is seconds (0 unmutes).',
+    parameters: writeParameters({
+      userId: { type: 'string' },
+      duration: { type: 'integer', minimum: 0, maximum: 2592000 },
+    }, ['userId', 'duration']),
+    execute: (args, scene, { store }) => {
+      if (!Number.isSafeInteger(args.duration) || args.duration < 0 || args.duration > 2592000) {
+        throw new TypeError('invalid mute duration')
+      }
+      return { group_id: scene.peerId, user_id: requireStableUserId(args.userId), duration: args.duration }
+    } }],
+  ['qq.set_group_whole_ban', { action: 'set_group_whole_ban', category: 'group', risk: 'high',
+    write: true, requiredCapability: 'qq.group.whole_ban',
+    description: 'Enable or disable whole-group mute in the bound group.',
+    parameters: writeParameters({ enable: { type: 'boolean' } }, ['enable']),
+    execute: (args, scene) => {
+      if (scene.kind !== 'group') throw new Error('QQ_GROUP_ONLY')
+      if (typeof args.enable !== 'boolean') throw new TypeError('invalid whole ban flag')
+      return { group_id: scene.peerId, enable: args.enable }
+    } }],
+  ['qq.set_group_kick', { action: 'set_group_kick', category: 'group', risk: 'high',
+    write: true, requiredCapability: 'qq.group.kick', memberPreflight: true,
+    description: 'Remove one observed member from the bound group; rejectAddRequest is optional.',
+    parameters: writeParameters({
+      userId: { type: 'string' },
+      rejectAddRequest: { type: 'boolean' },
+    }, ['userId']),
+    execute: (args, scene, { store }) => ({
+      group_id: scene.peerId,
+      user_id: requireStableUserId(args.userId),
+      reject_add_request: args.rejectAddRequest === true,
+    }) }],
+  ['qq.set_group_name', { action: 'set_group_name', category: 'group', risk: 'high',
+    write: true, requiredCapability: 'qq.group.name',
+    description: 'Rename the bound group; the model supplies only a bounded plain name.',
+    parameters: writeParameters({ name: { type: 'string' } }, ['name']),
+    execute: (args, scene) => {
+      if (scene.kind !== 'group') throw new Error('QQ_GROUP_ONLY')
+      if (typeof args.name !== 'string' || args.name.trim().length === 0 ||
+        args.name.length > 30 || /[\u0000-\u001f\u007f]/.test(args.name)) {
+        throw new TypeError('invalid group name')
+      }
+      return { group_id: scene.peerId, group_name: args.name }
+    } }],
+  ['qq.set_group_admin', { action: 'set_group_admin', category: 'group', risk: 'high',
+    write: true, requiredCapability: 'qq.group.admin', memberPreflight: true,
+    description: 'Set or unset administrator role for one observed member in the bound group.',
+    parameters: writeParameters({
+      userId: { type: 'string' },
+      enable: { type: 'boolean' },
+    }, ['userId', 'enable']),
+    execute: (args, scene, { store }) => {
+      if (typeof args.enable !== 'boolean') throw new TypeError('invalid admin flag')
+      return { group_id: scene.peerId, user_id: requireStableUserId(args.userId), enable: args.enable }
+    } }],
+  ['qq.set_group_special_title', { action: 'set_group_special_title', category: 'group', risk: 'medium',
+    write: true, requiredCapability: 'qq.group.special_title', memberPreflight: true,
+    description: 'Set one observed member’s special title in the bound group.',
+    parameters: writeParameters({
+      userId: { type: 'string' },
+      title: { type: 'string' },
+    }, ['userId', 'title']),
+    execute: (args, scene, { store }) => {
+      if (typeof args.title !== 'string' || args.title.length > 20 || /[\u0000-\u001f\u007f]/.test(args.title)) {
+        throw new TypeError('invalid special title')
+      }
+      return {
+        group_id: scene.peerId,
+        user_id: requireStableUserId(args.userId),
+        special_title: args.title,
+      }
+    } }],
 ])
 
 function validateArgs(args, schema) {
@@ -446,6 +665,7 @@ export class CapabilityRegistry {
     const scene = this.core.authorizedScene(sessionId)
     const definition = EXECUTABLE.get(id)
     if (!definition) throw new Error('QQ_CAPABILITY_NOT_EXECUTABLE')
+    if (definition.write === true) return this.#executeWrite(sessionId, id, definition, args, scene)
     const requiredCapability = definition.requiredCapability ?? 'qq.read'
     if (requiredCapability !== 'qq.read' &&
       this.core.authorizeSessionCapability(sessionId, requiredCapability) !== true) {
@@ -493,5 +713,73 @@ export class CapabilityRegistry {
     }
     if (JSON.stringify(result).length > MAX_RESULT_CHARS) throw new Error('QQ_CAPABILITY_RESULT_TOO_LARGE')
     return result
+  }
+
+  async #executeWrite(sessionId, id, definition, args, scene) {
+    const requiredCapability = definition.requiredCapability
+    const canWrite = () => this.core.authorizeSessionCapability(sessionId, requiredCapability) === true &&
+      this.core.authorizeSessionCapability(sessionId, 'qq.send') === true
+    if (!canWrite()) {
+      throw new Error(`QQ_PERMISSION_DENIED: ${requiredCapability}`)
+    }
+    validateArgs(args, definition.parameters)
+    if (typeof args.actionId !== 'string' || !/^[\w-]{1,100}$/.test(args.actionId)) {
+      throw new TypeError('invalid actionId')
+    }
+    const actionId = args.actionId
+    const payload = { ...args }
+    delete payload.actionId
+    const params = definition.execute(payload, scene, { store: this.store })
+    if (definition.memberPreflight === true) {
+      await this.#verifyGroupMember(scene, params.user_id)
+      // The membership query is external: revoke after it but before reserve.
+      if (!canWrite()) throw new Error(`QQ_PERMISSION_CHANGED: ${requiredCapability}`)
+    }
+    const fingerprint = createHash('sha256')
+      .update(JSON.stringify({ kind: 'capability', id, scene: sceneKey(scene), payload }))
+      .digest('hex')
+    const reserved = this.store.reserveDelivery(scene, actionId, fingerprint)
+    if (!reserved.fresh) {
+      return { status: reserved.delivery.status, repeated: true }
+    }
+    const inFlightKey = `${sceneKey(scene)}:${actionId}`
+    this.core.inFlightDeliveries.add(inFlightKey)
+    try {
+      if (!canWrite()) {
+        try { this.store.settleDelivery(scene, actionId, 'failed') } catch { /* keep permission failure */ }
+        throw new Error(`QQ_PERMISSION_CHANGED: ${requiredCapability}`)
+      }
+      if (this.transport.status !== 'connected') {
+        this.store.settleDelivery(scene, actionId, 'failed')
+        throw new Error('QQ_TRANSPORT_UNAVAILABLE')
+      }
+      try {
+        await this.transport.action(definition.action, params)
+      } catch (error) {
+        const status = error?.code === 'ONEBOT_REJECTED' ? 'failed' : 'unknown'
+        this.store.settleDelivery(scene, actionId, status)
+        return {
+          status,
+          repeated: false,
+          code: status === 'failed' ? 'ONEBOT_REJECTED' : 'QQ_DELIVERY_UNKNOWN',
+        }
+      }
+      this.store.settleDelivery(scene, actionId, 'delivered')
+      return { status: 'delivered', repeated: false }
+    } finally {
+      this.core.inFlightDeliveries.delete(inFlightKey)
+    }
+  }
+
+  async #verifyGroupMember(scene, userId) {
+    const row = this.store.getScene(scene)
+    if (row?.messages?.some(message => message.senderId === userId)) return
+    const data = await this.transport.action(
+      'get_group_member_info',
+      { group_id: scene.peerId, user_id: userId },
+      10_000,
+      MAX_GROUP_READ_RESPONSE_BYTES,
+    )
+    projectMemberInfo(data, { group_id: scene.peerId, user_id: userId })
   }
 }

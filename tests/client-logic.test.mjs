@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   buildSaveRequest,
+  capabilityConfigHint,
   capabilityStateHint,
   draftFromEntry,
   deliveryInputKey,
@@ -170,6 +171,34 @@ test('capability guidance explains effective denials without exposing arbitrary 
     'object prototype properties are not known reason codes')
   assert.equal(capabilityStateHint({ implemented: true, effective: true, reason: 'mode' }), null)
   assert.equal(capabilityStateHint({ implemented: false, effective: false, reason: 'unimplemented' }), null)
+})
+
+test('group management denial is not presented as an Owner restriction', () => {
+  const groupOnly = capabilityStateHint({ implemented: true, effective: false, reason: 'group-only' })
+  assert.match(groupOnly, /群聊/)
+  assert.match(groupOnly, /无关/)
+  assert.doesNotMatch(groupOnly, /仅.*Owner ?私聊|所有者代理/)
+  assert.match(capabilityStateHint({ implemented: true, effective: false, reason: 'qzone-read-explicit' }), /QZone/)
+  assert.match(capabilityStateHint({ implemented: true, effective: false, reason: 'qzone-use-explicit' }), /QZone/)
+  assert.match(capabilityStateHint({ implemented: true, effective: false, reason: 'profile-write-explicit' }), /Owner/)
+  assert.match(capabilityStateHint({ implemented: true, effective: false, reason: 'owner-workspace-required' }), /Owner 工作区/)
+})
+
+test('configuration hints are fixed and never expose a path or token', () => {
+  const owner = { implemented: true, effective: false, id: 'qq.owner.workspace' }
+  assert.match(capabilityConfigHint(owner, { ownerWorkspace: { configured: false } }), /核心|注册/)
+  assert.equal(capabilityConfigHint(owner, { ownerWorkspace: { configured: true } }), null)
+  const qzone = { implemented: true, effective: true, id: 'qq.qzone.read' }
+  assert.match(capabilityConfigHint(qzone, { providers: { qzone: { installed: false } } }), /Provider/)
+  assert.equal(capabilityConfigHint(qzone, { providers: { qzone: { installed: true } } }), null)
+  assert.match(capabilityConfigHint({ implemented: true, effective: true, id: 'qq.qzone.use' },
+    { providers: { qzone: { installed: false } } }), /Provider/)
+  assert.equal(capabilityConfigHint({ implemented: false, id: 'dsh.shell' }, {}), null)
+  const text = JSON.stringify([
+    capabilityConfigHint(owner, { ownerWorkspace: { configured: false } }),
+    capabilityConfigHint(qzone, { providers: { qzone: { installed: false } } }),
+  ])
+  assert.doesNotMatch(text, /C:\\\\|token|https?:|Users/i)
 })
 
 test('manual unknown-delivery reconciliation uses the owner management contract and never sends content', async () => {

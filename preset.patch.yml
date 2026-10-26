@@ -70,3 +70,34 @@
               presetGuard: true
               level: 2
               allowSearch: true
+    - id: preset-amadeus-qq-owner
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: amadeus-qq-owner
+        name: Amadeus QQ Owner
+        description: Restricted Owner workspace; selected only for a trusted Owner Agent Scene
+        order: 24
+        plugins:
+          - id: qq-owner-boundary
+            # Level 4 guards the QQ tool surface. The Owner workspace tool is
+            # mounted only after an operator supplies ownerWorkspaceRoot; until
+            # then Settings shows it as pending and no file tool exists.
+            name: '@amadeus/qq'
+            config:
+              presetGuard: true
+              level: 4
+          - id: owner-tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+          - id: owner-tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: owner-tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: owner-tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: owner-tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              search: true
+              fetch: true

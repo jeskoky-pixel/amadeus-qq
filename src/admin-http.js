@@ -9,6 +9,8 @@
 
 import { sceneIdentity } from './storage.js'
 import { MODE_IDS, validateScenePermissions } from './permissions.js'
+import { ownerWorkspaceStatus, providerStatus } from './owner-workspace.js'
+import { CONSOLE_CSS, CONSOLE_HTML, CONSOLE_JS } from './web-console.js'
 
 export const ADMIN_PREFIX = '/api/amadeus-qq'
 const MAX_BODY_BYTES = 64 * 1024
@@ -52,6 +54,29 @@ function send(res, status, payload) {
     'x-content-type-options': 'nosniff',
     'referrer-policy': 'no-referrer',
     'content-security-policy': "default-src 'none'",
+    'content-length': Buffer.byteLength(body),
+  })
+  res.end(body)
+}
+
+function sendConsoleAsset(res, contentType, body) {
+  res.writeHead(200, {
+    'content-type': contentType,
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
+    'x-frame-options': 'DENY',
+    'referrer-policy': 'no-referrer',
+    'content-security-policy': [
+      "default-src 'none'",
+      "script-src 'self'",
+      "style-src 'self'",
+      "connect-src 'self'",
+      "img-src 'none'",
+      "object-src 'none'",
+      "base-uri 'none'",
+      "form-action 'none'",
+      "frame-ancestors 'none'",
+    ].join('; '),
     'content-length': Buffer.byteLength(body),
   })
   res.end(body)
@@ -235,11 +260,26 @@ export function createAdminHandler(core, connection) {
 
     const path = url.pathname.slice(ADMIN_PREFIX.length) || '/'
     if (req.method === 'GET') {
+      if (path === '/console') {
+        return sendConsoleAsset(res, 'text/html; charset=utf-8', CONSOLE_HTML)
+      }
+      if (path === '/console.js') {
+        return sendConsoleAsset(res, 'text/javascript; charset=utf-8', CONSOLE_JS)
+      }
+      if (path === '/console.css') {
+        return sendConsoleAsset(res, 'text/css; charset=utf-8', CONSOLE_CSS)
+      }
       if (path !== '/scenes') return fail(res, 404, 'QQ_ENDPOINT_UNKNOWN', 'unknown QQ management endpoint')
       try {
         return send(res, 200, {
           ok: true,
-          data: { scenes: core.listScenePermissions(), health: core.health(), modes: [...MODE_IDS] },
+          data: {
+            scenes: core.listScenePermissions(),
+            health: core.health(),
+            modes: [...MODE_IDS],
+            ownerWorkspace: ownerWorkspaceStatus(),
+            providers: providerStatus(),
+          },
         })
       } catch {
         return fail(res, 500, 'QQ_MANAGEMENT_FAILED', 'QQ management request failed')

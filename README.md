@@ -1,10 +1,12 @@
 # amadeus-qq
 
-本地语音转写的隔离 Host 验收见[本地 record ASR 验收](docs/verification/LOCAL_RECORD_ASR_2026-10-26.md)与[QA.49 可靠性补验](docs/verification/QA49_RELIABILITY_INLINE_AUDIO_GUI_2026-10-26.md)。该能力仅在配置了本地 ASR Provider、`mediaRoot` 且 Scene 授权时可用；已支持有界内联 canonical WAV。本轮另加入显式绝对路径 `ffmpegPath` 的 MP3 与结构完整非 16 kHz WAV 转换，本机单元测试已用真实 ffmpeg 跑通，尚未在 DSH Desktop 或真实 NapCat 验收。安装源码的接口与媒体格式核查见[本机 NapCat 接口核查](docs/verification/LOCAL_NAPCAT_INTERFACE_2026-10-27.md)。Owner Agent 与自主社交模式在 Settings 中标为部分功能待实现。
+当前候选已完成隔离 DSH 与真实 NapCat/QQ 的集中验收，详见[最终验收记录](docs/verification/V1_REAL_NAPCAT_2026-10-27.md)。真实私聊文字、图片、语音收发，QQ 原生语音转写，Owner 原生工具，测试账号头像和签名，以及仅自己可见的文字/图片说说均有实机证据。最小 Web Console 已加入现有 Admin API。原 PR #1 保持 Draft，不自动部署或合并。
+
+本地 ASR 是可选兼容路径；v1.0 默认使用已在真实 NapCat 验证的 QQ 原生 `fetch_ptt_text`。详细功能状态和未完成项以[收缩版清单](docs/V1_SCOPE.md)为准。早期的[隔离 Desktop 验收](docs/verification/M2_M5_ISOLATED_DESKTOP_2026-10-27.md)保留作为历史证据。
 
 通过独立无头 NapCat 接入 QQ，维护持续收发、工具操作、等待续接、媒体、路由、去重和回执。
 
-**当前状态：v1.0 隔离开发候选，PR #1 仍为 Draft。**已有独立 DSH 插件包、持续 Session 核心、模拟 OneBot 回放、受限 Agent preset、逐 Scene 权限管理接口和原生 Settings GUI。隔离 DSH Desktop 已验证 GUI 场景选择、权限保存、并发冲突及重启持久性；见 [GUI 隔离验收](docs/verification/GUI_STAGE_2026-10-26.md)。`qq.read`、`qq.send`、经 Scene 授权的 DSH `web_search`，以及 Owner 私聊逐项授权的好友/群目录读取已有运行路径；搜索和目录的真实 Host 证据分别见 [搜索权限验收](docs/verification/SEARCH_BOUNDARY_2026-10-26.md)、[目录读取验收](docs/verification/DIRECTORY_BOUNDARY_2026-10-26.md)。入站媒体定位信息已做隔离清洗，Enhanced Scene 的单张本地图片读取和本地语音转写已通过真实 Host 模型调用与撤权验收；见 [媒体边界验收](docs/verification/MEDIA_BOUNDARY_2026-10-26.md)、[图片读取验收](docs/verification/MEDIA_READ_2026-10-26.md)与[QA.49 可靠性补验](docs/verification/QA49_RELIABILITY_INLINE_AUDIO_GUI_2026-10-26.md)。后续合批开发已增加 unknown 发送的 Owner 人工对账入口、能力拒绝原因提示、MP3/非规范采样率 WAV 转换、群精华/荣誉读取及 Scene 约束的文件/视频读取；本地回归通过，等待集中 Desktop 验收。媒体发送、QQ 空间、通用 Owner Agent、独立无头 NapCat 实机、真实 QQ、生态联动和跨场景 Memory 隐私仍待实现或验证，不可部署到日常 QQ。
+**当前状态：v1.0 开发候选，PR #1 仍为 Draft。**已有独立插件包、连续 Session、逐 Scene 权限、原生 Settings 和最小 Web Console。真实 NapCat/QQ 已完成限定测试私聊和测试账号的核心联调。Memory 联合 Host 隐私验收、Life Wake→QQ 闭环、State 联动、Web Console 人工 GUI 操作和长时间稳定性仍未完成；不应直接部署到日常 QQ。
 
 项目入口：[Amadeus-dsh](https://github.com/jeskoky-pixel/Amadeus-dsh)。开发顺序：P0。当前仓库已于 2026-10-25 根据用户要求公开，便于网页端审阅。
 
@@ -16,7 +18,7 @@ QQ 交互以现用 bridge 的黑盒体验为基准，允许修改或重写。仅
 
 ## 模块约定
 
-独立安装、升级、卸载，独立版本、测试和发布。当前包以 `enabled: false` 和 `connect: false` 启动；启用需要显式配置隔离状态路径、受限 Agent preset、允许的 bot/群/私聊 ID。Capability Registry 仅开放经本地验证的少量低风险只读动作；NapCat 完整动作名目录只是待核实清单。
+独立安装、升级、卸载，独立版本、测试和发布。当前包以 `enabled: false` 和 `connect: false` 启动；启用需要显式配置隔离状态路径、受限 Agent preset、允许的 bot/群/私聊 ID。Capability Registry 已开放受 Scene 权限约束的只读、社交和群管理动作；NapCat 完整动作名目录只是待核实清单，不代表这些动作可执行。
 
 ## 开发入口
 
@@ -29,7 +31,7 @@ QQ 交互以现用 bridge 的黑盒体验为基准，允许修改或重写。仅
 
 需求与验收关注：R-01、R-02、R-03、R-04、R-05、R-13、R-15；重点验收 A-02—A-06、A-12、A-15。
 
-下一步：继续 Owner Agent 与其他 DSH 通用工具的执行环境边界、可信 Scene/Memory 联动，以及独立无头 NapCat 和 M2–M5 能力；获授权后再做实机验收。
+下一步：完成收缩版清单中尚缺的 Memory/Life 联合 Host 与 Web Console 操作验收，再评估日常 QQ 部署；优先保留现有安全边界与回滚能力。
 
 ## 发布与隐私
 

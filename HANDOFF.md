@@ -1,5 +1,13 @@
 # amadeus-qq 交接
 
+## 最新检查点（2026-10-27，真实 NapCat/QQ 与 v1.0 收尾）
+
+当前候选已通过 253 项测试、0 失败、4 跳过，构建与差异检查通过。隔离 DSH 模型实际调用 Owner 的 `pwsh`/`read`、QQ 原生 ASR、私聊发送、账号资料与 QQ 空间工具；真实 NapCat 私聊文字/图片/语音收发、`fetch_ptt_text`、头像/签名修改及恢复、仅自己可见说说发布和删除也已验证。重启后相同私聊与空间 `actionId` 去重有效。新增最小同源 Web Console，尚未完成实机 GUI 手动操作。当前隔离 QQ 插件停用、`connect:false`，测试 NapCat 已停止，原生产 SnowLuma 配置未改。完整证据与未验收边界见[最终验收记录](docs/verification/V1_REAL_NAPCAT_2026-10-27.md)，最新剩余清单见[收缩版 v1.0 范围](docs/V1_SCOPE.md)。PR #1 保持 Draft，不自动合并部署。以下为历史检查点。
+
+## 最新检查点（2026-10-27，M2–M5 集中隔离验收）
+
+原 Draft PR #1 的开发分支 codex/m0-baseline 已加入媒体发送/上传、可选 QZone Provider、账号资料、受控 Owner 工作区、群管理和相应权限/可靠性回归。Codex 独立 npm test 为 225 通过、0 失败、4 跳过；构建与差异检查通过。官方 DSH Desktop 隔离 Profile 安装 0.1.0-qa.final，真实模型工具调用、本机模拟 OneBot、平台拒绝、撤权、硬重启去重和 Owner 工具重启后读取通过。精确证据、包 hash、边界与回滚建议见 [集中隔离验收](docs/verification/M2_M5_ISOLATED_DESKTOP_2026-10-27.md)。Profile 已恢复 connect:false，模拟 OneBot 已停止；未连接真实 QQ 或生产 Profile。用户已指示暂缓新增 GUI 开发，保留已有 Settings 页面，可能后续改为 Web UI。不要把下方历史检查点当作当前代码状态。
+
 ## 当前 M3 开发检查点（2026-10-27，NapCat 安装源码核查与媒体读取）
 
 只读核查了本机安装的 NapCat 核心 `napcat.mjs`：`get_record` 的 `out_format` 列表与本地 file/base64 返回路径已确认；外部 FFmpeg 分支没有保证 WAV 为 16 kHz，故本地 ASR 新增结构完整的非 16 kHz PCM16 WAV 转码。`get_file` 的 file/file_id 与 file/url/可选 base64 契约也已核实，但独立无头实例未确认正在运行，没有调用真实 QQ API。详情见 `docs/verification/LOCAL_NAPCAT_INTERFACE_2026-10-27.md`。

@@ -70,6 +70,11 @@ const CAPABILITY_REASON_HINTS = Object.freeze({
   'scene-deny': '该 Scene 显式拒绝（deny）此能力。',
   'owner-private-required': '仅可信 Owner 私聊的 Owner Agent 模式可用。',
   'owner-tool-required': '宿主未为该 Owner 场景配置此工具。',
+  'group-only': '仅群聊 Scene 可用；私聊不适用，与 Owner 权限无关。',
+  'qzone-read-explicit': '需在自主社交或可信 Owner Agent 模式显式 allow 才能读取 QZone。',
+  'qzone-use-explicit': '需在自主社交或可信 Owner Agent 模式显式 allow 才能使用 QZone。',
+  'profile-write-explicit': '账号资料写入仅限可信 Owner 私聊的 Owner Agent 模式并显式 allow。',
+  'owner-workspace-required': 'Owner 工作区需可信 Owner 私聊、Owner Agent 模式并显式 allow。',
   mode: '当前模式未包含此能力。',
   'scene-allow': '该 Scene 显式允许，但保存后按最新模式重算。',
 })
@@ -86,6 +91,19 @@ export function capabilityStateHint(capability) {
   return typeof reason === 'string' && Object.hasOwn(CAPABILITY_REASON_HINTS, reason)
     ? CAPABILITY_REASON_HINTS[reason]
     : '当前策略拒绝该能力。'
+}
+
+/** Configuration hints; never a path, token or credential. */
+export function capabilityConfigHint(capability, runtime = {}) {
+  if (!capability || capability.implemented !== true) return null
+  if (capability.id === 'qq.owner.workspace' && runtime.ownerWorkspace?.configured !== true) {
+    return '需要核心用实际 QQ 配置注册专用目录并授权后才可用。'
+  }
+  if ((capability.id === 'qq.qzone.use' || capability.id === 'qq.qzone.read' || capability.id === 'qq.qzone.publish')
+    && runtime.providers?.qzone?.installed !== true) {
+    return '需要配置 QZone loopback Provider 后才可用；当前未观测到接线。'
+  }
+  return null
 }
 
 export function buildSaveRequest(entry, draft) {
@@ -215,6 +233,37 @@ export async function savePermissions(entry, draft, fetchImpl = fetch) {
  */
 export function deliveryInputKey(entry, actionId) {
   return 'delivery-confirm:' + String(entry?.key ?? '') + '|' + String(actionId)
+}
+
+/**
+ * Fixed Settings copy for the Owner workspace. It never includes a directory
+ * path, token or provider URL; an unwired core keeps the feature "pending".
+ */
+export function ownerWorkspaceSummary(status) {
+  const configured = status?.configured === true
+  const writes = status?.writes === true
+  const maxBytes = Number.isSafeInteger(status?.maxBytes) && status.maxBytes > 0 ? status.maxBytes : 0
+  return {
+    state: configured ? '已接线' : 'pending（待核心接线）',
+    writes: writes ? '可写（逐次审批）' : '只读',
+    maxBytes,
+    note: configured
+      ? '目录与写入授权由插件配置决定；本页不显示路径，也不保存配置。实机写入仍需人工审批，尚未完成真实验证。'
+      : 'Owner preset 已随包；核心尚未用实际 QQ 配置注册 Owner 工作区（未接线），当前不可读、不可写。',
+  }
+}
+
+/** Provider labels only; never a root path, loopback URL or token value. */
+export function providerSummary(providers) {
+  const stateOf = provider => {
+    if (provider?.installed !== true) return '未观测到接线'
+    if (provider?.configured !== true) return '已安装，未配置'
+    return provider?.enabled === true ? '已配置' : '已安装，未启用'
+  }
+  return {
+    mediaSend: stateOf(providers?.mediaSend),
+    qzone: stateOf(providers?.qzone),
+  }
 }
 
 /**

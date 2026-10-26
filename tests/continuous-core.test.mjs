@@ -499,3 +499,72 @@ test('archived successful action remains deduplicated after restart', async t =>
   await assert.rejects(restarted.send(sessionId, { ...args(1), segments: [{ type: 'text', data: { text: 'changed' } }] }), /CONFLICT/)
   restarted.close()
 })
+
+test('prepared media sends and file uploads use the persistent action ledger', async t => {
+  const f = fixture(t)
+  const core = f.make()
+  const { sessionId } = await core.ingest(privateMessage('901'))
+  const fingerprint = 'a'.repeat(64)
+  const plan = {
+    mode: 'message',
+    fingerprint,
+    segments: [{ type: 'image', data: { file: 'C:\\snapshot\\image.png' } }],
+  }
+  assert.deepEqual(await core.sendPreparedMedia(sessionId, 'media-1', plan),
+    { status: 'delivered', repeated: false, messageId: '90001' })
+  assert.deepEqual(await core.sendPreparedMedia(sessionId, 'media-1', plan),
+    { status: 'delivered', repeated: true, messageId: '90001' })
+  assert.deepEqual(await core.sendPreparedMedia(sessionId, 'audio-1', {
+    ...plan,
+    fingerprint: 'f'.repeat(64),
+    segments: [{ type: 'record', data: { file: 'C:\\snapshot\\voice.wav' } }],
+  }), { status: 'delivered', repeated: false, messageId: '90001' })
+  await assert.rejects(core.sendPreparedMedia(sessionId, 'media-1', {
+    ...plan, fingerprint: 'e'.repeat(64), segments: [{ type: 'image', data: { file: 'C:\\snapshot\\other.png' } }],
+  }), /ACTION_CONFLICT/)
+  await assert.rejects(core.sendPreparedMedia(sessionId, 'media-1', {
+    ...plan, segments: [{ type: 'video', data: { file: 'C:\\snapshot\\same-bytes.mp4' } }],
+  }), /ACTION_CONFLICT/)
+  assert.equal((await core.sendPreparedMedia(sessionId, 'media-1', {
+    ...plan, segments: [{ type: 'image', data: { file: 'C:\\snapshot\\relocated.png' } }],
+  })).repeated, true, 'temporary snapshot path is not part of the ledger identity')
+
+  const unknown = fixture(t, { send: async () => { throw new Error('transport timeout') } })
+  const unknownCore = unknown.make()
+  const unknownSession = (await unknownCore.ingest(privateMessage('902'))).sessionId
+  assert.deepEqual(await unknownCore.sendPreparedMedia(unknownSession, 'media-2', plan),
+    { status: 'unknown', repeated: false, messageId: null })
+  await assert.rejects(unknownCore.sendPreparedMedia(unknownSession, 'media-3', plan), /DELIVERY_UNRESOLVED/)
+  unknownCore.close()
+
+  f.transport.action = async () => ({ file_id: 'file_abc' })
+  const upload = {
+    mode: 'upload',
+    action: 'upload_private_file',
+    fingerprint: 'b'.repeat(64),
+    params: { user_id: '30001', file: 'C:\\snapshot\\doc.pdf', name: 'doc.pdf', upload_file: true },
+  }
+  assert.deepEqual(await core.uploadSceneFile(sessionId, 'upload-1', upload),
+    { status: 'delivered', repeated: false, fileId: 'file_abc' })
+  assert.deepEqual(await core.uploadSceneFile(sessionId, 'upload-1', upload),
+    { status: 'delivered', repeated: true, fileId: 'file_abc' })
+  await assert.rejects(core.uploadSceneFile(sessionId, 'upload-1', {
+    ...upload, params: { ...upload.params, name: 'renamed.pdf' },
+  }), /ACTION_CONFLICT/)
+  f.transport.action = async () => ({})
+  assert.equal((await core.uploadSceneFile(sessionId, 'upload-2', {
+    ...upload, fingerprint: 'c'.repeat(64),
+  })).status, 'unknown')
+
+  core.close()
+  const restarted = f.make()
+  assert.equal((await restarted.sendPreparedMedia(sessionId, 'media-1', {
+    ...plan, segments: [{ type: 'image', data: { file: 'C:\\snapshot\\after-restart.png' } }],
+  })).repeated, true)
+  assert.equal((await restarted.uploadSceneFile(sessionId, 'upload-1', upload)).repeated, true)
+  restarted.store.setScenePermissions({ botId, kind: 'private', peerId: '30001' }, { mode: 'observe', overrides: {} })
+  await assert.rejects(restarted.sendPreparedMedia(sessionId, 'media-revoked', {
+    ...plan, fingerprint: 'd'.repeat(64),
+  }), /PERMISSION|UNAUTHORIZED|CHANGED/)
+  restarted.close()
+})

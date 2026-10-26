@@ -1,5 +1,9 @@
 import path from 'node:path'
+import fs from 'node:fs'
+import os from 'node:os'
+import { createHash } from 'node:crypto'
 import { QQStore } from './storage.js'
+import { sceneKey } from './storage.js'
 import { QQCore } from './core.js'
 import { OneBotAdapter } from './onebot.js'
 import { acquireInstanceLease } from './lease.js'
@@ -7,8 +11,17 @@ import { CapabilityRegistry } from './capabilities.js'
 import { readMessageImage } from './media.js'
 import { readMessageFile, readMessageVideo } from './files.js'
 import { transcribeMessageRecord } from './audio.js'
+import { transcribeMessageRecordNative } from './native-asr.js'
+import { prepareOutboundMedia } from './outbound-media.js'
+import { createQzoneProvider } from './qzone-provider.js'
+import { createAccountProfile } from './account-profile.js'
+import {
+  createOwnerWorkspaceTool,
+  resolveOwnerWorkspacePolicy,
+  setOwnerWorkspaceStatus,
+} from './owner-workspace.js'
 import { Config } from './config.js'
-import { apply as applyPresetGuard } from './preset-guard.mjs'
+import { apply as applyPresetGuard, OWNER_NATIVE_TOOLS } from './preset-guard.mjs'
 import { ADMIN_PREFIX, createAdminHandler } from './admin-http.js'
 
 export const name = 'amadeus-qq'
@@ -20,6 +33,8 @@ const QQ_TOOL_NAMES = Object.freeze([
   'qq_mark_read', 'qq_connection_status', 'qq_capability_search',
   'qq_capability_describe', 'qq_capability_execute', 'qq_read_message_image',
   'qq_transcribe_message_record', 'qq_read_message_file', 'qq_read_message_video',
+  'qq_transcribe_message_record_native',
+  'qq_send_media', 'qq_upload_file', 'qq_qzone', 'qq_owner_workspace', 'qq_account_profile',
 ])
 const QQ_TOOL_SET = new Set(QQ_TOOL_NAMES)
 const JSON_OBJECT = Object.freeze({ type: 'object', additionalProperties: true })
@@ -45,6 +60,39 @@ function registerTool(ctx, definition) {
     },
     output,
   })
+}
+
+/**
+ * Snapshot an already-validated outbound plan into an owner-only temp file and
+ * verify the copied bytes still match the helper's SHA-256. NapCat then reads
+ * the private snapshot, not the original path, closing the read-to-send window.
+ */
+async function snapshotOutboundPlan(plan) {
+  const source = plan.mode === 'upload' ? plan.params?.file : plan.segments?.[0]?.data?.file
+  if (typeof source !== 'string' || !path.isAbsolute(source)) throw new Error('QQ_MEDIA_PLAN_INVALID')
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'amadeus-qq-send-'))
+  const snapshot = path.join(dir, path.basename(source))
+  try {
+    await fs.promises.copyFile(source, snapshot, fs.constants.COPYFILE_EXCL)
+    await fs.promises.chmod(snapshot, 0o600)
+    const bytes = await fs.promises.readFile(snapshot)
+    const digest = createHash('sha256').update(bytes).digest('hex')
+    if (digest !== plan.fingerprint) {
+      const error = new Error('QQ_MEDIA_FINGERPRINT_MISMATCH')
+      error.code = 'QQ_MEDIA_FINGERPRINT_MISMATCH'
+      throw error
+    }
+    const prepared = plan.mode === 'upload'
+      ? { ...plan, params: { ...plan.params, file: snapshot } }
+      : { ...plan, segments: [{ ...plan.segments[0], data: { ...plan.segments[0].data, file: snapshot } }] }
+    return {
+      plan: prepared,
+      cleanup: () => fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {}),
+    }
+  } catch (error) {
+    await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {})
+    throw error
+  }
 }
 
 export function makeDshHost(ctx, config) {
@@ -73,7 +121,8 @@ export function makeDshHost(ctx, config) {
     },
     async createSceneSession(_scene, grant) {
       let requestedPreset = config.agentPreset
-      if (grant?.mediaAllowed === true && grant?.searchAllowed === true) requestedPreset = 'amadeus-qq-media-search'
+      if (grant?.ownerAgent === true) requestedPreset = 'amadeus-qq-owner'
+      else if (grant?.mediaAllowed === true && grant?.searchAllowed === true) requestedPreset = 'amadeus-qq-media-search'
       else if (grant?.mediaAllowed === true) requestedPreset = 'amadeus-qq-media'
       else if (grant?.searchAllowed === true) requestedPreset = 'amadeus-qq-search'
       const created = await controller.create({ cwd: config.sessionCwd, agentPreset: requestedPreset })
@@ -215,6 +264,11 @@ export function apply(ctx, config = {}) {
         ? undefined
         : 'QQ Session search permission is not authorized'
     }
+    if (OWNER_NATIVE_TOOLS.includes(exec.name)) {
+      return core.authorizeSessionCapability(sid, 'qq.owner.tools')
+        ? undefined
+        : 'QQ Session cannot use non-QQ tools'
+    }
     return 'QQ Session cannot use non-QQ tools'
   })
 
@@ -281,6 +335,256 @@ export function apply(ctx, config = {}) {
     }, required: ['id'] },
     timeoutMs: 20_000,
     execute: (args, exec) => capabilities.execute(sessionIdOf(exec), args.id, args.args ?? {}),
+  })
+
+  registerTool(ctx, {
+    name: 'qq_transcribe_message_record_native',
+    description: 'Transcribe one voice record already present in this Session’s bound QQ message using QQ native PTT transcription; only a message ID is accepted.',
+    parameters: { type: 'object', additionalProperties: false, properties: {
+      messageId: { type: 'string' },
+    }, required: ['messageId'] },
+    timeoutMs: 20_000,
+    execute: (args, exec) => transcribeMessageRecordNative({
+      core,
+      store,
+      transport,
+      sessionId: sessionIdOf(exec),
+      messageId: args.messageId,
+    }),
+  })
+
+  // Outbound media is restricted to a configured directory. The helper owns
+  // root/type/size validation; snapshotOutboundPlan then seals the exact bytes
+  // NapCat will read. No model-supplied URL, absolute path or attachment ref.
+  if (typeof config.sendRoot === 'string' && path.isAbsolute(config.sendRoot)) {
+    registerTool(ctx, {
+      name: 'qq_send_media',
+      description: 'Send one image, GIF or video from a relative path under the configured media send root.',
+      parameters: { type: 'object', additionalProperties: false, properties: {
+        actionId: { type: 'string' },
+        kind: { type: 'string', enum: ['image', 'gif', 'video', 'audio'] },
+        path: { type: 'string' },
+      }, required: ['actionId', 'kind', 'path'] },
+      timeoutMs: 30_000,
+      execute: async (args, exec) => {
+        const sessionId = sessionIdOf(exec)
+        const plan = await prepareOutboundMedia({
+          core,
+          sessionId,
+          kind: args.kind,
+          source: { type: 'send-root', path: args.path },
+          sendRoot: config.sendRoot,
+          attachments: null,
+        })
+        if (plan.mode !== 'message') throw new Error('QQ_MEDIA_PLAN_INVALID')
+        const snapshot = await snapshotOutboundPlan(plan)
+        try {
+          return await core.sendPreparedMedia(sessionId, args.actionId, snapshot.plan)
+        } finally {
+          await snapshot.cleanup()
+        }
+      },
+    })
+    registerTool(ctx, {
+      name: 'qq_upload_file',
+      description: 'Upload one file from a relative path under the configured media send root to this bound QQ scene.',
+      parameters: { type: 'object', additionalProperties: false, properties: {
+        actionId: { type: 'string' },
+        path: { type: 'string' },
+      }, required: ['actionId', 'path'] },
+      timeoutMs: 60_000,
+      execute: async (args, exec) => {
+        const sessionId = sessionIdOf(exec)
+        const plan = await prepareOutboundMedia({
+          core,
+          sessionId,
+          kind: 'file',
+          source: { type: 'send-root', path: args.path },
+          sendRoot: config.sendRoot,
+          attachments: null,
+        })
+        if (plan.mode !== 'upload') throw new Error('QQ_MEDIA_PLAN_INVALID')
+        const snapshot = await snapshotOutboundPlan(plan)
+        try {
+          return await core.uploadSceneFile(sessionId, args.actionId, snapshot.plan)
+        } finally {
+          await snapshot.cleanup()
+        }
+      },
+    })
+  }
+
+  // QZone is optional. Native NapCat publishes posts; a configured loopback
+  // provider can supply the remaining read and interaction operations. Every operation re-checks the bound
+  // Scene and capability; writes go through the same durable delivery ledger.
+  const qzoneAllowed = (sessionId, write) =>
+    core.authorizeSessionCapability(sessionId, 'qq.qzone.use') === true ||
+    core.authorizeSessionCapability(sessionId, write ? 'qq.qzone.publish' : 'qq.qzone.read') === true
+  let qzoneProvider
+  if (config.qzoneEnabled === true) {
+    try {
+      qzoneProvider = createQzoneProvider({
+        ...(config.qzoneLoopbackUrl && config.qzoneTokenEnv
+          ? { baseUrl: config.qzoneLoopbackUrl, tokenEnv: config.qzoneTokenEnv }
+          : {}),
+        env: process.env,
+        nativeTransport: { action: (name, params, timeoutMs, maxResponseBytes) =>
+          transport.action(name, params, timeoutMs, maxResponseBytes) },
+        sendRoot: config.sendRoot || undefined,
+      })
+    } catch {
+      ctx.logger?.warn?.('amadeus-qq: QZone provider configuration is unavailable')
+    }
+  }
+  if (qzoneProvider) {
+    registerTool(ctx, {
+      name: 'qq_qzone',
+      description: 'Publish text or controlled images through NapCat; optional loopback provider supplies QZone reads and interactions. Targets must come from this Scene’s observed posts.',
+      parameters: { type: 'object', additionalProperties: false, properties: {
+        op: { type: 'string', enum: ['own_posts', 'friend_feeds', 'comments', 'publish_text', 'publish_media', 'like', 'unlike', 'comment', 'reply', 'forward', 'delete'] },
+        tid: { type: 'string' },
+        commentId: { type: 'string' },
+        text: { type: 'string' },
+        images: { type: 'array', maxItems: 9, items: { type: 'string' } },
+        audience: { type: 'string', enum: ['self', 'friends', 'public'] },
+        cursor: { type: 'string' },
+        limit: { type: 'integer', minimum: 1, maximum: 100 },
+        actionId: { type: 'string' },
+      }, required: ['op'] },
+      timeoutMs: 20_000,
+      execute: async (args, exec) => {
+        const sessionId = sessionIdOf(exec)
+        const scene = core.authorizedScene(sessionId)
+        const context = {
+          sceneKey: sceneKey(scene),
+          sessionId,
+          authorize: async request => qzoneAllowed(sessionId, request?.write === true),
+          ledger: {
+            run: async request => {
+              const reserved = store.reserveDelivery(scene, request.actionId, request.fingerprint)
+              if (!reserved.fresh) {
+                return { status: reserved.delivery.status, repeated: true, result: null }
+              }
+              if (!qzoneAllowed(sessionId, true)) {
+                try { store.settleDelivery(scene, request.actionId, 'failed') } catch { /* keep refusal */ }
+                throw new Error('QQ_PERMISSION_CHANGED: qq.qzone.publish')
+              }
+              const key = `${sceneKey(scene)}:${request.actionId}`
+              core.inFlightDeliveries.add(key)
+              try {
+                const result = await request.execute()
+                store.settleDelivery(scene, request.actionId, 'delivered')
+                return { status: 'delivered', repeated: false, result }
+              } catch (error) {
+                const status = error?.code === 'QQ_QZONE_REJECTED' ? 'failed' : 'unknown'
+                store.settleDelivery(scene, request.actionId, status)
+                throw error
+              } finally {
+                core.inFlightDeliveries.delete(key)
+              }
+            },
+          },
+        }
+        switch (args.op) {
+          case 'own_posts': return qzoneProvider.listOwnPosts(context, args)
+          case 'friend_feeds': return qzoneProvider.listFriendFeeds(context, args)
+          case 'comments': return qzoneProvider.listComments(context, args)
+          case 'publish_text': return qzoneProvider.publishText(context, args)
+          case 'publish_media': return qzoneProvider.publishMedia(context, args)
+          case 'like': return qzoneProvider.likePost(context, args)
+          case 'unlike': return qzoneProvider.unlikePost(context, args)
+          case 'comment': return qzoneProvider.commentPost(context, args)
+          case 'reply': return qzoneProvider.replyComment(context, args)
+          case 'forward': return qzoneProvider.forwardPost(context, args)
+          case 'delete': return qzoneProvider.deleteOwnPost(context, args)
+          default: throw new Error('QQ_QZONE_OP_INVALID')
+        }
+      },
+    })
+    ctx.effect(() => () => qzoneProvider.close())
+  }
+
+  // Account profile is an Owner-private global action. Reads require a verified
+  // Owner Scene; writes additionally require qq.profile.write and an actionId.
+  const accountProfile = createAccountProfile({
+    core,
+    transport,
+    sendRoot: config.sendRoot,
+    authorize: async request => {
+      const sessionId = request?.sessionId
+      if (typeof sessionId !== 'string') return false
+      try {
+        if (core.trustedSceneForSession(sessionId).admin !== true) return false
+      } catch {
+        return false
+      }
+      return core.authorizeSessionCapability(
+        sessionId,
+        request?.write === true ? 'qq.profile.write' : 'qq.read',
+      ) === true
+    },
+    ledger: {
+      run: async request => {
+        const scene = core.authorizedScene(request.sessionId)
+        const reserved = store.reserveDelivery(scene, request.actionId, request.fingerprint)
+        if (!reserved.fresh) {
+          return { status: reserved.delivery.status, repeated: true, profile: null }
+        }
+        const key = `${sceneKey(scene)}:${request.actionId}`
+        core.inFlightDeliveries.add(key)
+        let dispatched = false
+        try {
+          if (core.authorizeSessionCapability(request.sessionId, 'qq.profile.write') !== true ||
+            core.trustedSceneForSession(request.sessionId).admin !== true) {
+            store.settleDelivery(scene, request.actionId, 'failed')
+            throw new Error('QQ_PROFILE_UNAUTHORIZED')
+          }
+          dispatched = true
+          const profile = await request.execute()
+          store.settleDelivery(scene, request.actionId, 'delivered')
+          return { status: 'delivered', repeated: false, profile }
+        } catch (error) {
+          try {
+            store.settleDelivery(scene, request.actionId, dispatched ? 'unknown' : 'failed')
+          } catch { /* already terminal */ }
+          throw error
+        } finally {
+          core.inFlightDeliveries.delete(key)
+        }
+      },
+    },
+  })
+  registerTool(ctx, {
+    name: 'qq_account_profile',
+    description: 'Read or update the current QQ account profile. Only a verified Owner private Scene may use this; writes require an actionId. Avatar changes return platform confirmation without visual readback.',
+    parameters: { type: 'object', additionalProperties: false, properties: {
+      op: { type: 'string', enum: ['read', 'set_signature', 'set_nickname', 'set_online_status', 'set_avatar'] },
+      signature: { type: 'string' },
+      nickname: { type: 'string' },
+      path: { type: 'string' },
+      status: { type: 'integer' },
+      extStatus: { type: 'integer' },
+      batteryStatus: { type: 'integer' },
+      actionId: { type: 'string' },
+    }, required: ['op'] },
+    timeoutMs: 20_000,
+    execute: async (args, exec) => {
+      const sessionId = sessionIdOf(exec)
+      switch (args.op) {
+        case 'read': return accountProfile.readProfile({ sessionId })
+        case 'set_signature': return accountProfile.setSignature({ sessionId, signature: args.signature, actionId: args.actionId })
+        case 'set_nickname': return accountProfile.setNickname({ sessionId, nickname: args.nickname, actionId: args.actionId })
+        case 'set_avatar': return accountProfile.setAvatar({ sessionId, path: args.path, actionId: args.actionId })
+        case 'set_online_status': return accountProfile.setOnlineStatus({
+          sessionId,
+          status: args.status,
+          extStatus: args.extStatus,
+          batteryStatus: args.batteryStatus,
+          actionId: args.actionId,
+        })
+        default: throw new Error('QQ_PROFILE_OP_INVALID')
+      }
+    },
   })
 
   // Media is optional: wait for the official attachment service without making
@@ -431,6 +735,47 @@ export function apply(ctx, config = {}) {
     } catch {
       try { ctx.logger?.warn?.('amadeus-qq: record transcription unavailable; speechToText service could not be injected') } catch { /* optional diagnostic sink */ }
     }
+  }
+
+  // The connector owns the real Owner workspace settings. The preset guard only
+  // controls visibility at level 4; it no longer registers this tool itself.
+  let ownerWorkspacePolicy
+  try {
+    ownerWorkspacePolicy = resolveOwnerWorkspacePolicy(config)
+  } catch {
+    ownerWorkspacePolicy = null
+  }
+  if (ownerWorkspacePolicy && ownerWorkspacePolicy.root !== '') {
+    const getService = () => {
+      try {
+        const service = typeof ctx.get === 'function' ? ctx.get('qq') : undefined
+        if (service) return service
+      } catch { /* fall through to the in-process adapter */ }
+      return {
+        resolveTrustedSessionScene: sessionId => core.trustedSceneForSession(sessionId),
+        authorizeSessionCapability: (sessionId, capability) => core.authorizeSessionCapability(sessionId, capability),
+      }
+    }
+    const getApproval = () => {
+      try {
+        const approval = typeof ctx.get === 'function' ? ctx.get('approval') : undefined
+        return approval ?? ctx.approval
+      } catch {
+        return undefined
+      }
+    }
+    registerTool(ctx, createOwnerWorkspaceTool({
+      root: ownerWorkspacePolicy.root,
+      allowWrite: ownerWorkspacePolicy.allowWrite,
+      maxBytes: ownerWorkspacePolicy.maxBytes,
+      getService,
+      getApproval,
+    }))
+    setOwnerWorkspaceStatus({
+      configured: true,
+      writes: ownerWorkspacePolicy.allowWrite,
+      maxBytes: ownerWorkspacePolicy.maxBytes,
+    })
   }
 
   ctx.provide('qq', Object.freeze({

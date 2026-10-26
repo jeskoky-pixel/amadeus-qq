@@ -8,7 +8,7 @@ const MODE_LABELS = {
   'owner-agent': '所有者代理（Owner Agent，部分功能待实现）',
 }
 
-const RESERVED_MODE_NOTE = '部分功能待实现：Owner Agent 当前没有 Shell、文件、浏览器、GitHub 等通用工具执行路径；自主社交的 QQ 空间发布也未接入。保存只记录未来策略，QQ 能力仍以下方每项的实际生效状态为准。'
+const RESERVED_MODE_NOTE = '部分功能需配置或尚未验证：通用 Shell、浏览器、GitHub 仍未实现；QZone 与 Owner 工作区属于可选能力，需要配置 Provider/专用目录并在对应模式显式授权，且尚未完成真实 QQ 验证。保存只记录策略，实际能力以下方每项生效状态为准。'
 
 const CAPABILITY_LABELS = {
   'qq.read': '读取 QQ 消息',
@@ -16,9 +16,25 @@ const CAPABILITY_LABELS = {
   'dsh.search': 'DSH 搜索',
   'qq.friends.read': '读取 QQ 好友目录',
   'qq.groups.read': '读取 QQ 群目录',
-  'qq.media.read': 'QQ 媒体读取',
-  'qq.qzone.publish': 'QQ 空间发布',
-  'dsh.shell': 'DSH Shell',
+  'qq.media.read': 'QQ 媒体读取（图片/语音/文件/视频）',
+  'qq.reaction.write': '表情回应 / 点赞',
+  'qq.poke': '戳一戳',
+  'qq.recall': '撤回消息',
+  'qq.group.essence': '设置群精华',
+  'qq.group.notice': '发布群公告',
+  'qq.group.card': '修改群名片',
+  'qq.group.ban': '禁言群成员',
+  'qq.group.whole_ban': '全员禁言',
+  'qq.group.kick': '移出群成员',
+  'qq.group.name': '修改群名称',
+  'qq.group.admin': '设置群管理员',
+  'qq.group.special_title': '设置群头衔',
+  'qq.profile.write': '修改账号资料',
+  'qq.qzone.use': '使用 QQ 空间（发布/互动/读取）',
+  'qq.qzone.read': '读取 QQ 空间（旧版）',
+  'qq.qzone.publish': 'QQ 空间发布（旧版）',
+  'qq.owner.workspace': 'Owner 工作区文件',
+  'dsh.shell': 'DSH Shell（未实现）',
 }
 
 const CSS = `
@@ -152,6 +168,9 @@ function Panel() {
 
   const scenes = Array.isArray(data?.scenes) ? data.scenes : []
   const health = data?.health ?? null
+  const ownerWorkspace = data?.ownerWorkspace ?? { configured: false, writes: false, maxBytes: 0 }
+  const workspaceSummary = ownerWorkspaceSummary(ownerWorkspace)
+  const providersSummary = providerSummary(data?.providers)
   const selected = scenes.find(item => item.key === selectedKey) || null
   const dirty = selected && draft ? isDraftDirty(selected, draft) : false
   const validation = selected && draft ? validateDraft(selected, draft) : '未选择场景'
@@ -304,7 +323,7 @@ function Panel() {
         'div',
         null,
         React.createElement('h2', null, 'Amadeus QQ'),
-        React.createElement('div', { className: 'sub' }, 'QQ 场景权限。选择场景后可调整模式与能力覆盖；未实现能力只记录策略，不会执行。'),
+        React.createElement('div', { className: 'sub' }, 'QQ 场景权限。选择场景后可调整模式与能力覆盖；未实现或未配置的能力不会执行，实际能力以每项生效状态为准。'),
       ),
       React.createElement('button', { type: 'button', onClick: () => { void load() }, disabled: loading || busy }, loading ? '刷新中…' : '刷新'),
     ),
@@ -315,6 +334,43 @@ function Panel() {
       React.createElement('span', { className: 'chip ' + (health?.transport === 'connected' ? 'ok' : 'warn') }, formatTransport(health?.transport)),
       React.createElement('span', { className: 'chip' }, '已见场景：' + (health?.scenes ?? scenes.length)),
       React.createElement('span', { className: 'chip' }, '活跃等待：' + (health?.activeWaits ?? 0)),
+    ),
+    React.createElement(
+      'div',
+      { className: 'panel' },
+      React.createElement('h3', null, 'Owner 工作区'),
+      React.createElement('small', null,
+        '通用 Shell、浏览器、GitHub 工具未实现。Owner Agent 只提供受限的专用目录文件查看/写入；读取与写入都要求专用能力，写入还需逐次 Host 人工审批，审批不可用时拒绝。'),
+      React.createElement(
+        'div',
+        { className: 'chips' },
+        React.createElement('span', { className: 'chip ' + (ownerWorkspace.configured ? 'ok' : 'warn') },
+          '状态：' + workspaceSummary.state),
+        React.createElement('span', { className: 'chip' }, '权限：qq.owner.workspace（核心目录）'),
+        React.createElement('span', { className: 'chip ' + (ownerWorkspace.writes ? 'warn' : 'ok') },
+          '写入：' + workspaceSummary.writes),
+        React.createElement('span', { className: 'chip warn' }, '实机未验证'),
+        ownerWorkspace.configured
+          ? React.createElement('span', { className: 'chip' }, '单文件上限 ' + workspaceSummary.maxBytes + ' 字节')
+          : null,
+      ),
+      React.createElement('small', { className: 'muted' }, workspaceSummary.note),
+    ),
+    React.createElement(
+      'div',
+      { className: 'panel' },
+      React.createElement('h3', null, '媒体发送与 QZone'),
+      React.createElement('small', null,
+        '这里只显示 Provider 状态，不显示目录路径、回环地址或令牌环境变量值。两项默认关闭。'),
+      React.createElement(
+        'div',
+        { className: 'chips' },
+        React.createElement('span', { className: 'chip warn' }, '媒体发送：' + providersSummary.mediaSend),
+        React.createElement('span', { className: 'chip warn' }, 'QZone：' + providersSummary.qzone),
+        React.createElement('span', { className: 'chip warn' }, '实机未验证'),
+      ),
+      React.createElement('small', { className: 'muted' },
+        '状态来自当前 QQ preset 看到的实时工具清单；没有活动 QQ Session 时可能显示未观测到接线。权限允许与否见各能力行，实机投递/发布尚未验证。'),
     ),
     readOnly ? React.createElement('div', { className: 'message error' }, '此页面为只读：当前请求没有通过 DSH Owner 验证，或管理接口不可用。仅本机访问不等于管理员授权。') : null,
     error ? React.createElement('div', { className: 'message error', role: 'alert' }, '读取或保存失败：' + managementErrorMessage(error)) : null,
@@ -361,7 +417,7 @@ function Panel() {
               'div',
               { className: 'editorMain' },
               React.createElement('strong', null, '模式'),
-              React.createElement('small', null, '五级模式只代表能力，不包含人格。'),
+              React.createElement('small', null, '五级模式只代表能力，不包含人格；群管理在 Safe Chat 默认包含（仍需机器人具备群权限），不需要 Owner Agent。'),
             ),
             React.createElement(
               'select',
@@ -385,8 +441,11 @@ function Panel() {
           draft.mode === 'owner-agent' || draft.mode === 'autonomous-social'
             ? React.createElement('small', { className: 'muted', role: 'note' }, RESERVED_MODE_NOTE)
             : null,
-          ...(selected.capabilities ?? []).map(cap => {
+          ...(selected.capabilities ?? [])
+            .filter(cap => cap.id !== 'qq.qzone.read' && cap.id !== 'qq.qzone.publish')
+            .map(cap => {
             const hint = capabilityStateHint(cap)
+            const configHint = capabilityConfigHint(cap, { ownerWorkspace, providers: data?.providers })
             return React.createElement(
             'div',
             { className: 'editorRow', key: cap.id },
@@ -421,6 +480,7 @@ function Panel() {
                   : '策略占位，尚不可执行',
               ),
               hint ? React.createElement('small', { className: 'muted' }, hint) : null,
+              configHint ? React.createElement('small', { className: 'muted' }, configHint) : null,
             ),
           )}),
           React.createElement(

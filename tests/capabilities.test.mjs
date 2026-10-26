@@ -28,7 +28,7 @@ function fixture(t, { permissionPolicy = {} } = {}) {
     if (name === 'get_login_info') return { user_id: 10001, nickname: 'Synthetic bot' }
     return { ok: true }
   }, stop() {} }
-  const core = new QQCore({ store, dsh: {}, transport,
+  const core = new QQCore({ store, dsh: { async cancelSceneSession() { return { accepted: true } } }, transport,
     policy: { botIds: ['10001'], groupIds: ['20001'], privateIds: ['30001'] }, permissionPolicy })
   return { registry: new CapabilityRegistry({ core, store, transport }), core, calls, transport }
 }
@@ -378,5 +378,161 @@ test('revoking an essence read while the response is in flight prevents disclosu
   core.store.setScenePermissions(group, { mode: 'observe', overrides: {} })
   release([{ message_id: 70001, sender_id: 40001, content: [{ type: 'text', data: { text: 'revoked essence' } }] }])
   await assert.rejects(request, /QQ_PERMISSION|QQ_UNAUTHORIZED/)
+  core.close()
+})
+
+test('writable message and group actions reserve actionIds, bind targets and deduplicate', async t => {
+  const { registry, core, transport, calls } = fixture(t)
+  const group = { botId: '10001', kind: 'group', peerId: '20001' }
+  core.store.appendMessage(group, { messageId: '8101', senderId: '40001', segments: [] })
+  core.store.appendMessage(group, { messageId: '8102', senderId: '50001', segments: [] })
+
+  assert.deepEqual(await registry.execute('group-session', 'qq.set_msg_emoji_like',
+    { actionId: 'emoji-1', messageId: '8101', emojiId: '123' }), { status: 'delivered', repeated: false })
+  assert.deepEqual(calls.at(-1), { name: 'set_msg_emoji_like', args: { message_id: '8101', emoji_id: '123', set: true } })
+  assert.deepEqual(await registry.execute('group-session', 'qq.set_msg_emoji_like',
+    { actionId: 'emoji-1', messageId: '8101', emojiId: '123' }), { status: 'delivered', repeated: true })
+  await assert.rejects(registry.execute('group-session', 'qq.set_msg_emoji_like',
+    { actionId: 'emoji-2', messageId: '9999', emojiId: '123' }), /MESSAGE_SCOPE/)
+
+  assert.equal((await registry.execute('group-session', 'qq.send_poke',
+    { actionId: 'poke-1', userId: '40001' })).status, 'delivered')
+  assert.deepEqual(calls.at(-1), { name: 'send_poke', args: { group_id: '20001', user_id: '40001', target_id: '40001' } })
+  await assert.rejects(registry.execute('group-session', 'qq.send_poke',
+    { actionId: 'poke-2', userId: '9999' }), /PERSON_SCOPE/)
+
+  core.store.reserveDelivery(group, 'own-send', 'a'.repeat(64))
+  core.store.settleDelivery(group, 'own-send', 'delivered', '8101')
+  assert.equal((await registry.execute('group-session', 'qq.delete_msg',
+    { actionId: 'recall-1', messageId: '8101' })).status, 'delivered')
+  assert.deepEqual(calls.at(-1), { name: 'delete_msg', args: { message_id: '8101' } })
+  await assert.rejects(registry.execute('group-session', 'qq.delete_msg',
+    { actionId: 'recall-2', messageId: '8102' }), /RECALL_SCOPE/)
+
+  // Safe Chat group management is normal when the platform account is a group
+  // administrator; NapCat remains the authority that can reject it.
+  for (const id of ['qq.set_essence_msg', 'qq.delete_essence_msg']) {
+    assert.equal((await registry.execute('group-session', id,
+      { actionId: id.includes('delete') ? 'essence-delete-1' : 'essence-set-1', messageId: '8101' })).status, 'delivered')
+  }
+  assert.equal((await registry.execute('group-session', 'qq.set_group_card',
+    { actionId: 'card-1', card: 'Amadeus' })).status, 'delivered')
+  assert.deepEqual(calls.at(-1), { name: 'set_group_card', args: { group_id: '20001', user_id: '10001', card: 'Amadeus' } })
+  assert.equal((await registry.execute('group-session', 'qq.send_group_notice',
+    { actionId: 'notice-1', content: 'Notice', pinned: true })).status, 'delivered')
+  assert.deepEqual(calls.at(-1), { name: '_send_group_notice', args: {
+    group_id: '20001', content: 'Notice', pinned: 1, type: 1, confirm_required: 1, is_show_edit_card: 0, tip_window_type: 0,
+  } })
+  await assert.rejects(registry.execute('group-session', 'qq.set_essence_msg',
+    { actionId: 'essence-cross', messageId: '9999' }), /MESSAGE_SCOPE/)
+  transport.action = async () => { const error = new Error('platform rejected'); error.code = 'ONEBOT_REJECTED'; throw error }
+  const rejected = await registry.execute('group-session', 'qq.set_group_card',
+    { actionId: 'card-rejected', card: 'x' })
+  assert.equal(rejected.status, 'failed')
+  assert.equal(rejected.code, 'ONEBOT_REJECTED')
+  await core.setScenePermissions(group, { mode: 'observe', overrides: {} }, { expectedRevision: 0 })
+  await assert.rejects(registry.execute('group-session', 'qq.set_group_card',
+    { actionId: 'card-revoked', card: 'x' }), /PERMISSION|UNAUTHORIZED|CHANGED/)
+  await assert.rejects(registry.execute('private-session', 'qq.set_group_card',
+    { actionId: 'card-2', card: 'x' }), /PERMISSION|GROUP_ONLY/)
+  core.close()
+})
+
+test('group moderation actions bind the group, observed user and ledger', async t => {
+  const { registry, core, transport, calls } = fixture(t)
+  const group = { botId: '10001', kind: 'group', peerId: '20001' }
+  core.store.appendMessage(group, { messageId: '8201', senderId: '40001', segments: [] })
+  const cases = [
+    ['qq.set_group_ban', { actionId: 'ban-1', userId: '40001', duration: 60 },
+      'set_group_ban', { group_id: '20001', user_id: '40001', duration: 60 }],
+    ['qq.set_group_whole_ban', { actionId: 'whole-1', enable: true },
+      'set_group_whole_ban', { group_id: '20001', enable: true }],
+    ['qq.set_group_kick', { actionId: 'kick-1', userId: '40001', rejectAddRequest: true },
+      'set_group_kick', { group_id: '20001', user_id: '40001', reject_add_request: true }],
+    ['qq.set_group_name', { actionId: 'name-1', name: 'Renamed' },
+      'set_group_name', { group_id: '20001', group_name: 'Renamed' }],
+    ['qq.set_group_admin', { actionId: 'admin-1', userId: '40001', enable: true },
+      'set_group_admin', { group_id: '20001', user_id: '40001', enable: true }],
+    ['qq.set_group_special_title', { actionId: 'title-1', userId: '40001', title: 'MVP' },
+      'set_group_special_title', { group_id: '20001', user_id: '40001', special_title: 'MVP' }],
+  ]
+  for (const [id, args, action, params] of cases) {
+    assert.equal((await registry.execute('group-session', id, args)).status, 'delivered', id)
+    assert.deepEqual(calls.at(-1), { name: action, args: params }, id)
+  }
+  transport.action = async () => ({ group_id: 99999, user_id: 99999, nickname: 'Foreign member' })
+  await assert.rejects(registry.execute('group-session', 'qq.set_group_kick',
+    { actionId: 'kick-unknown', userId: '99999' }), /SCOPE_MISMATCH/)
+  await assert.rejects(registry.execute('private-session', 'qq.set_group_name',
+    { actionId: 'name-private', name: 'x' }), /PERMISSION|GROUP_ONLY/)
+  assert.equal(registry.describe('qq.set_group_ban').risk, 'high')
+  assert.equal(registry.describe('qq.set_group_special_title').risk, 'medium')
+  assert.throws(() => registry.describe('qq.set_group_add_request'), /QQ_CAPABILITY_UNKNOWN/)
+  assert.equal(registry.describe('napcat.set_group_add_request').executable, false)
+  core.close()
+})
+
+test('group moderation can manage a current member who has not spoken, with a bounded identity preflight', async t => {
+  const { registry, core, transport, calls } = fixture(t)
+  const group = { botId: '10001', kind: 'group', peerId: '20001' }
+  core.store.appendMessage(group, { messageId: '8301', senderId: '40001', segments: [] })
+  const member = { group_id: 20001, user_id: 50002, nickname: 'Silent member' }
+  transport.action = async (name, args) => {
+    calls.push({ name, args })
+    if (name === 'get_group_member_info') return member
+    return { ok: true }
+  }
+  assert.equal((await registry.execute('group-session', 'qq.set_group_ban',
+    { actionId: 'silent-ban', userId: '50002', duration: 30 })).status, 'delivered')
+  assert.deepEqual(calls.map(call => call.name), ['get_group_member_info', 'set_group_ban'])
+  assert.deepEqual(calls[0].args, { group_id: '20001', user_id: '50002' })
+
+  const before = core.store.getScene(group).deliveries.length
+  transport.action = async (name, args) => {
+    calls.push({ name, args })
+    if (name === 'get_group_member_info') return { group_id: 99999, user_id: 50002 }
+    return { ok: true }
+  }
+  await assert.rejects(registry.execute('group-session', 'qq.set_group_kick',
+    { actionId: 'wrong-group', userId: '50002' }), /SCOPE_MISMATCH/)
+  transport.action = async () => { const error = new Error('lookup failed'); error.code = 'ONEBOT_REJECTED'; throw error }
+  await assert.rejects(registry.execute('group-session', 'qq.set_group_admin',
+    { actionId: 'lookup-failed', userId: '50003', enable: true }))
+  assert.equal(core.store.getScene(group).deliveries.length, before, 'preflight failures do not reserve writes')
+
+  let release
+  let entered
+  const started = new Promise(resolve => { entered = resolve })
+  transport.action = async name => {
+    if (name === 'get_group_member_info') {
+      entered()
+      return new Promise(resolve => { release = resolve })
+    }
+    return { ok: true }
+  }
+  const pending = registry.execute('group-session', 'qq.set_group_special_title',
+    { actionId: 'revoke-preflight', userId: '50004', title: 'x' })
+  await started
+  await core.setScenePermissions(group, { mode: 'observe', overrides: {} }, { expectedRevision: 0 })
+  release({ group_id: 20001, user_id: 50004 })
+  await assert.rejects(pending, /PERMISSION|UNAUTHORIZED|CHANGED/)
+  assert.equal(core.store.getScene(group).deliveries.length, before, 'revocation during preflight writes no ledger')
+  core.close()
+})
+
+test('group notice reads are bounded and projected; profile writes stay unsupported', async t => {
+  const { registry, core, transport } = fixture(t)
+  transport.action = async () => [{
+    notice_id: 'n-1', sender_id: 40001, publish_time: 10, read_num: 3, pinned: true,
+    send_to_new_member: false, message: { text: 'notice body', image: [{ url: 'https://secret.invalid' }] },
+    settings: { secret: 'hidden' },
+  }]
+  const result = await registry.execute('group-session', 'qq.get_group_notice')
+  assert.equal(result.data.items[0].text, 'notice body')
+  assert.equal(JSON.stringify(result).includes('secret.invalid'), false)
+  assert.equal(JSON.stringify(result).includes('hidden'), false)
+  for (const id of ['qq.set_qq_profile', 'qq.set_qq_avatar', 'qq.set_online_status']) {
+    assert.throws(() => registry.describe(id), /QQ_CAPABILITY_UNKNOWN/)
+  }
   core.close()
 })

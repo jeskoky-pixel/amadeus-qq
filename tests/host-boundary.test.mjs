@@ -99,6 +99,8 @@ test('DSH host creates the packaged preset without a per-Agent restriction API',
     { sessionId: 'new-qq-session', agentPreset: 'amadeus-qq-media' })
   assert.deepEqual(await host.createSceneSession({}, { mediaAllowed: true, searchAllowed: true }),
     { sessionId: 'new-qq-session', agentPreset: 'amadeus-qq-media-search' })
+  assert.deepEqual(await host.createSceneSession({}, { ownerAgent: true }),
+    { sessionId: 'new-qq-session', agentPreset: 'amadeus-qq-owner' })
   const swapped = makeDshHost({ sessionController: {
     create: async () => ({ sessionId: 'unsafe', agentPreset: 'cordis' }),
     prompt: async () => ({ accepted: true }),
@@ -134,6 +136,23 @@ test('host guard denies every non-QQ tool for persisted QQ Session and tool args
   assert.equal((await host.tools.get('qq_connection_status').execute({}, exec)).enabled, true)
   for (const effect of host.effects.reverse()) effect()
   assert.equal(fs.existsSync(`${statePath}.lock`), false)
+})
+
+test('native PTT transcription is always registered with a messageId-only schema', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amadeus-qq-native-tool-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const host = fakeHost()
+  apply(host.ctx, {
+    enabled: true, connect: false, statePath: path.join(dir, 'qq.json'),
+    sessionCwd: dir, agentPreset: 'amadeus-qq',
+    policy: { botIds: ['10001'], privateIds: ['30001'], groupIds: [] },
+  })
+  const tool = host.tools.get('qq_transcribe_message_record_native')
+  assert.ok(tool, 'native PTT transcription does not depend on optional attachment or ASR services')
+  assert.deepEqual(Object.keys(tool.parameters.properties), ['messageId'])
+  await assert.rejects(tool.execute({ messageId: '701', file: '/private/voice.wav' },
+    { agent: { session: { id: 'unbound' } } }), /unknown QQ tool argument/)
+  for (const effect of host.effects.reverse()) effect()
 })
 
 test('image tool takes only message identity and ordinal, never a model supplied locator', async t => {
@@ -257,4 +276,31 @@ test('connector startup failure emits a bounded diagnostic instead of disappeari
   assert.match(diagnostics[0], /transport|OneBot/i)
   assert.ok(!diagnostics[0].includes(dir), 'diagnostic must not expose local state paths')
   for (const effect of host.effects.reverse()) effect()
+})
+
+test('connector registers the Owner workspace only with a live configured root', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amadeus-qq-owner-reg-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const root = path.join(dir, 'owner')
+  fs.mkdirSync(root)
+  const host = fakeHost()
+  apply(host.ctx, {
+    enabled: true, connect: false,
+    statePath: path.join(dir, 'qq.json'), sessionCwd: dir, agentPreset: 'amadeus-qq',
+    ownerWorkspaceRoot: root, ownerWorkspaceWrites: false,
+    policy: { botIds: ['10001'], privateIds: ['30001'], groupIds: ['20001'] },
+  })
+  assert.ok(host.tools.has('qq_owner_workspace'))
+  for (const effect of host.effects.reverse()) effect()
+
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'amadeus-qq-owner-unset-'))
+  t.after(() => fs.rmSync(bare, { recursive: true, force: true }))
+  const unset = fakeHost()
+  apply(unset.ctx, {
+    enabled: true, connect: false,
+    statePath: path.join(bare, 'qq.json'), sessionCwd: bare, agentPreset: 'amadeus-qq',
+    policy: { botIds: ['10001'], privateIds: ['30001'], groupIds: ['20001'] },
+  })
+  assert.equal(unset.tools.has('qq_owner_workspace'), false)
+  for (const effect of unset.effects.reverse()) effect()
 })

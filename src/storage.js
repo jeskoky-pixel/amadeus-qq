@@ -10,6 +10,7 @@ const DEFAULT_MAX_MESSAGES = 500
 const DEFAULT_MAX_SEEN = 2048
 const DEFAULT_MAX_DELIVERIES = 500
 const DEFAULT_MAX_ARCHIVED_DELIVERIES = 4096
+const MAX_TRANSCRIPT_CHARS = 4000
 const TERMINAL_DELIVERY_STATUSES = new Set(['delivered', 'failed'])
 
 export function normalizeId(value, label = 'id') {
@@ -83,6 +84,11 @@ function validateState(state) {
       if (message.needsPrompt !== undefined && typeof message.needsPrompt !== 'boolean') {
         throw new Error(`QQ state contains an invalid message delivery flag: ${key}`)
       }
+      if (message.transcript !== undefined &&
+        (typeof message.transcript !== 'string' || message.transcript.length < 1 ||
+          message.transcript.length > MAX_TRANSCRIPT_CHARS)) {
+        throw new Error(`QQ state contains an invalid message transcript: ${key}`)
+      }
     }
     const actionIds = new Set()
     for (const delivery of [...row.deliveries, ...(row.deliveryArchive ?? [])]) {
@@ -96,6 +102,10 @@ function validateState(state) {
       }
       if (!['delivered', 'failed', 'unknown'].includes(delivery.status)) {
         throw new Error(`QQ state contains an invalid delivery status: ${key}`)
+      }
+      if (delivery.platformFileId !== undefined && delivery.platformFileId !== null &&
+        (typeof delivery.platformFileId !== 'string' || !/^[A-Za-z0-9_-]{1,200}$/.test(delivery.platformFileId))) {
+        throw new Error(`QQ state contains an invalid delivery file receipt: ${key}`)
       }
     }
     for (const delivery of row.deliveryArchive ?? []) {
@@ -340,6 +350,24 @@ export class QQStore {
     })
   }
 
+  /**
+   * Attach a bounded native transcript to an existing message without creating
+   * a new message or advancing any cursor. Repeated writes are idempotent.
+   */
+  setMessageTranscript(identity, messageId, transcript) {
+    const normalizedId = normalizeMessageId(messageId, 'messageId')
+    if (typeof transcript !== 'string') throw new TypeError('transcript must be a string')
+    const text = transcript.trim()
+    if (text.length < 1 || text.length > MAX_TRANSCRIPT_CHARS) throw new RangeError('invalid transcript length')
+    return this.#change(state => {
+      const row = this.#row(state, identity)
+      const message = row.messages.find(item => item.messageId === normalizedId)
+      if (!message) throw new Error('QQ_MESSAGE_SCOPE: transcript target is not in this scene')
+      message.transcript = text
+      return clone({ messageId: message.messageId, senderId: message.senderId, transcript: message.transcript })
+    })
+  }
+
   unread(identity, afterSeq = 0, limit = 50) {
     if (!Number.isSafeInteger(afterSeq) || afterSeq < 0) throw new TypeError('invalid afterSeq')
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) throw new TypeError('invalid limit')
@@ -401,14 +429,25 @@ export class QQStore {
         row.deliveryArchive.push({ ...archived, archivedAt: Date.now() })
         while (row.deliveryArchive.length > this.maxArchivedDeliveries) row.deliveryArchive.shift()
       }
-      const delivery = { actionId, fingerprint, status: 'unknown', platformMessageId: null, updatedAt: Date.now() }
+      const delivery = {
+        actionId,
+        fingerprint,
+        status: 'unknown',
+        platformMessageId: null,
+        platformFileId: null,
+        updatedAt: Date.now(),
+      }
       row.deliveries.push(delivery)
       return { fresh: true, delivery: clone(delivery) }
     })
   }
 
-  settleDelivery(identity, actionId, status, platformMessageId = null) {
+  settleDelivery(identity, actionId, status, platformMessageId = null, platformFileId = null) {
     if (!['delivered', 'failed', 'unknown'].includes(status)) throw new TypeError('invalid delivery status')
+    if (platformFileId !== null &&
+      (typeof platformFileId !== 'string' || !/^[A-Za-z0-9_-]{1,200}$/.test(platformFileId))) {
+      throw new TypeError('invalid platformFileId')
+    }
     return this.#change(state => {
       const row = this.#row(state, identity)
       const delivery = row.deliveries.find(item => item.actionId === actionId)
@@ -416,6 +455,7 @@ export class QQStore {
       if (delivery.status === 'delivered' && status !== 'delivered') throw new Error('delivered action cannot be downgraded')
       delivery.status = status
       delivery.platformMessageId = platformMessageId === null ? null : normalizeMessageId(platformMessageId, 'platformMessageId')
+      delivery.platformFileId = platformFileId
       delivery.updatedAt = Date.now()
       return clone(delivery)
     })

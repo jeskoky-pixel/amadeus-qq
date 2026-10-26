@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import path from 'node:path'
 import { normalizeId, normalizeMessageId, sceneIdentity, sceneKey } from './storage.js'
 import { normalizeOneBotMessage, sanitizeInboundSegments, validateOutgoingSegments } from './onebot.js'
 import { CAPABILITY_CATALOG, PermissionEngine, validateScenePermissions } from './permissions.js'
@@ -230,6 +231,10 @@ export class QQCore {
     const created = await this.dsh.createSceneSession(scene, {
       searchAllowed: this.#can(scene, 'dsh.search'),
       mediaAllowed: this.#can(scene, 'qq.media.read'),
+      ownerAgent: scene.kind === 'private' &&
+        this.permissions.ownerPrivateIds.has(scene.peerId) &&
+        this.permissions.evaluate(scene, this.store.getScenePermissions(scene), 'qq.read').mode === 'owner-agent',
+      ownerWorkspaceAllowed: this.#can(scene, 'qq.owner.workspace'),
     })
     const sessionId = typeof created === 'string' ? created : created?.sessionId
     if (!sessionId) throw new Error('DSH did not return a Session ID')
@@ -392,6 +397,119 @@ export class QQCore {
         const status = error?.code === 'ONEBOT_REJECTED' ? 'failed' : 'unknown'
         this.store.settleDelivery(row, actionId, status)
         return { status, repeated: false, messageId: null }
+      }
+    } finally {
+      this.inFlightDeliveries.delete(inFlightKey)
+    }
+  }
+
+  async sendPreparedMedia(sessionId, actionId, plan) {
+    const row = this.#requireAuthorizedSession(sessionId, 'qq.send')
+    if (typeof actionId !== 'string' || !/^[\w-]{1,100}$/.test(actionId)) throw new TypeError('invalid actionId')
+    if (!plan || typeof plan !== 'object' || Array.isArray(plan) ||
+      plan.mode !== 'message' || !/^[a-f0-9]{64}$/.test(plan.fingerprint) ||
+      !Array.isArray(plan.segments) || plan.segments.length !== 1) {
+      throw new TypeError('invalid outbound media plan')
+    }
+    const segment = plan.segments[0]
+    if (!segment || !['image', 'video', 'record'].includes(segment.type) ||
+      !segment.data || typeof segment.data.file !== 'string' || !segment.data.file) {
+      throw new TypeError('invalid outbound media segment')
+    }
+    const ledgerFingerprint = createHash('sha256').update(JSON.stringify({
+      operation: 'send-media',
+      scene: sceneKey(row),
+      segmentType: segment.type,
+      mediaType: typeof plan.mediaType === 'string' ? plan.mediaType : null,
+      contentHash: plan.fingerprint,
+    })).digest('hex')
+    const reserved = this.store.reserveDelivery(row, actionId, ledgerFingerprint)
+    if (!reserved.fresh) {
+      return {
+        status: reserved.delivery.status,
+        repeated: true,
+        messageId: reserved.delivery.platformMessageId,
+      }
+    }
+    const inFlightKey = `${sceneKey(row)}:${actionId}`
+    this.inFlightDeliveries.add(inFlightKey)
+    try {
+      try {
+        this.#requireAuthorizedSession(sessionId, 'qq.send')
+      } catch (error) {
+        try { this.store.settleDelivery(row, actionId, 'failed') } catch { /* keep permission failure */ }
+        throw error
+      }
+      try {
+        const receipt = await this.transport.send(row, plan.segments)
+        const messageId = normalizeMessageId(receipt.messageId)
+        const delivery = this.store.settleDelivery(row, actionId, 'delivered', messageId)
+        return { status: delivery.status, repeated: false, messageId }
+      } catch (error) {
+        const status = error?.code === 'ONEBOT_REJECTED' ? 'failed' : 'unknown'
+        this.store.settleDelivery(row, actionId, status)
+        return { status, repeated: false, messageId: null }
+      }
+    } finally {
+      this.inFlightDeliveries.delete(inFlightKey)
+    }
+  }
+
+  async uploadSceneFile(sessionId, actionId, plan) {
+    const row = this.#requireAuthorizedSession(sessionId, 'qq.send')
+    if (typeof actionId !== 'string' || !/^[\w-]{1,100}$/.test(actionId)) throw new TypeError('invalid actionId')
+    const expectedAction = row.kind === 'group' ? 'upload_group_file' : 'upload_private_file'
+    if (!plan || typeof plan !== 'object' || Array.isArray(plan) ||
+      plan.mode !== 'upload' || plan.action !== expectedAction ||
+      !/^[a-f0-9]{64}$/.test(plan.fingerprint) ||
+      !plan.params || typeof plan.params !== 'object' || Array.isArray(plan.params) ||
+      typeof plan.params.file !== 'string' || !path.isAbsolute(plan.params.file) ||
+      typeof plan.params.name !== 'string' || !plan.params.name ||
+      plan.params.upload_file !== true) {
+      throw new TypeError('invalid outbound upload plan')
+    }
+    const target = row.kind === 'group' ? plan.params.group_id : plan.params.user_id
+    if (String(target) !== String(row.peerId)) throw new Error('QQ_UPLOAD_SCOPE')
+    const ledgerFingerprint = createHash('sha256').update(JSON.stringify({
+      operation: 'upload-file',
+      scene: sceneKey(row),
+      action: plan.action,
+      name: plan.params.name,
+      mediaType: typeof plan.mediaType === 'string' ? plan.mediaType : null,
+      contentHash: plan.fingerprint,
+    })).digest('hex')
+    const reserved = this.store.reserveDelivery(row, actionId, ledgerFingerprint)
+    if (!reserved.fresh) {
+      return {
+        status: reserved.delivery.status,
+        repeated: true,
+        fileId: reserved.delivery.platformFileId ?? null,
+      }
+    }
+    const inFlightKey = `${sceneKey(row)}:${actionId}`
+    this.inFlightDeliveries.add(inFlightKey)
+    try {
+      try {
+        this.#requireAuthorizedSession(sessionId, 'qq.send')
+      } catch (error) {
+        try { this.store.settleDelivery(row, actionId, 'failed') } catch { /* keep permission failure */ }
+        throw error
+      }
+      try {
+        const result = await this.transport.action(plan.action, plan.params)
+        const fileId = typeof result?.file_id === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(result.file_id)
+          ? result.file_id
+          : null
+        if (fileId === null) {
+          this.store.settleDelivery(row, actionId, 'unknown')
+          return { status: 'unknown', repeated: false, fileId: null }
+        }
+        const delivery = this.store.settleDelivery(row, actionId, 'delivered', null, fileId)
+        return { status: delivery.status, repeated: false, fileId }
+      } catch (error) {
+        const status = error?.code === 'ONEBOT_REJECTED' ? 'failed' : 'unknown'
+        this.store.settleDelivery(row, actionId, status)
+        return { status, repeated: false, fileId: null }
       }
     } finally {
       this.inFlightDeliveries.delete(inFlightKey)

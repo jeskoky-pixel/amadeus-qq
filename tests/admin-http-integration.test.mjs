@@ -126,7 +126,7 @@ test('management stays unavailable without optional Host services and does not b
   }))
 })
 
-test('unimplemented Owner capabilities never appear effective or authorize a bound Session', t => {
+test('Owner mode never implies shell; implemented QZone follows account and Scene grants', t => {
   const { core, store } = coreFixture(t, { permissionPolicy: {
     ownerPrivateIds: ['30001'], ownerTools: ['dsh.shell'],
     accountGrants: { byBotId: { '10001': { qzonePublish: true } } },
@@ -136,12 +136,22 @@ test('unimplemented Owner capabilities never appear effective or authorize a bou
   store.bindSession(ownerScene, 'owner-session')
   const listed = core.listScenePermissions().find(row => row.scene.peerId === '30001')
   assert.equal(listed.effectiveMode, 'owner-agent')
-  for (const id of ['dsh.shell', 'qq.qzone.publish']) {
-    const capability = listed.capabilities.find(item => item.id === id)
-    assert.equal(capability.implemented, false)
-    assert.equal(capability.effective, false, id)
-    assert.equal(core.authorizeSessionCapability('owner-session', id), false, id)
-  }
+
+  const shell = listed.capabilities.find(item => item.id === 'dsh.shell')
+  assert.equal(shell.implemented, false)
+  assert.equal(shell.effective, false)
+  assert.equal(core.authorizeSessionCapability('owner-session', 'dsh.shell'), false)
+
+  const qzone = listed.capabilities.find(item => item.id === 'qq.qzone.publish')
+  assert.equal(qzone.implemented, true)
+  assert.equal(qzone.effective, true)
+  assert.equal(core.authorizeSessionCapability('owner-session', 'qq.qzone.publish'), true)
+
+  const ownerWorkspace = listed.capabilities.find(item => item.id === 'qq.owner.workspace')
+  assert.equal(ownerWorkspace.implemented, true)
+  assert.equal(ownerWorkspace.effective, false,
+    'owner-agent mode alone must not grant the dedicated Owner workspace')
+  assert.equal(core.authorizeSessionCapability('owner-session', 'qq.owner.workspace'), false)
 })
 
 test('permission updates require exact revision, reject malformed bodies and keep stored state intact', async t => {

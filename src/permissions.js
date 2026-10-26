@@ -5,12 +5,17 @@ export const MODE_IDS = Object.freeze([
   'observe', 'safe-chat', 'enhanced', 'autonomous-social', 'owner-agent',
 ])
 
+const GROUP_WRITE_DEFAULTS = [
+  'qq.group.essence', 'qq.group.notice', 'qq.group.card',
+  'qq.group.ban', 'qq.group.whole_ban', 'qq.group.kick',
+  'qq.group.name', 'qq.group.admin', 'qq.group.special_title',
+]
 const MODE_TO_CAPABILITIES = Object.freeze({
   observe: ['qq.read'],
-  'safe-chat': ['qq.read', 'qq.send', 'dsh.search'],
-  enhanced: ['qq.read', 'qq.send', 'dsh.search', 'qq.media.read'],
-  'autonomous-social': ['qq.read', 'qq.send', 'dsh.search', 'qq.media.read', 'qq.qzone.publish'],
-  'owner-agent': ['qq.read', 'qq.send', 'dsh.search', 'qq.media.read', 'qq.qzone.publish', 'dsh.shell'],
+  'safe-chat': ['qq.read', 'qq.send', 'dsh.search', 'qq.reaction.write', 'qq.poke', 'qq.recall', ...GROUP_WRITE_DEFAULTS],
+  enhanced: ['qq.read', 'qq.send', 'dsh.search', 'qq.media.read', 'qq.reaction.write', 'qq.poke', 'qq.recall', ...GROUP_WRITE_DEFAULTS],
+  'autonomous-social': ['qq.read', 'qq.send', 'dsh.search', 'qq.media.read', 'qq.qzone.publish', 'qq.reaction.write', 'qq.poke', 'qq.recall', ...GROUP_WRITE_DEFAULTS],
+  'owner-agent': ['qq.read', 'qq.send', 'dsh.search', 'qq.media.read', 'qq.qzone.publish', 'dsh.shell', 'qq.reaction.write', 'qq.poke', 'qq.recall', ...GROUP_WRITE_DEFAULTS],
 })
 
 /**
@@ -25,11 +30,30 @@ export const CAPABILITY_CATALOG = Object.freeze([
   Object.freeze({ id: 'qq.friends.read', implemented: true }),
   Object.freeze({ id: 'qq.groups.read', implemented: true }),
   Object.freeze({ id: 'qq.media.read', implemented: true }),
-  Object.freeze({ id: 'qq.qzone.publish', implemented: false }),
+  Object.freeze({ id: 'qq.owner.workspace', implemented: true }),
+  Object.freeze({ id: 'qq.owner.tools', implemented: true }),
+  Object.freeze({ id: 'qq.reaction.write', implemented: true }),
+  Object.freeze({ id: 'qq.poke', implemented: true }),
+  Object.freeze({ id: 'qq.recall', implemented: true }),
+  Object.freeze({ id: 'qq.group.essence', implemented: true }),
+  Object.freeze({ id: 'qq.group.notice', implemented: true }),
+  Object.freeze({ id: 'qq.group.card', implemented: true }),
+  Object.freeze({ id: 'qq.group.ban', implemented: true }),
+  Object.freeze({ id: 'qq.group.whole_ban', implemented: true }),
+  Object.freeze({ id: 'qq.group.kick', implemented: true }),
+  Object.freeze({ id: 'qq.group.name', implemented: true }),
+  Object.freeze({ id: 'qq.group.admin', implemented: true }),
+  Object.freeze({ id: 'qq.group.special_title', implemented: true }),
+  Object.freeze({ id: 'qq.profile.write', implemented: true }),
+  Object.freeze({ id: 'qq.qzone.use', implemented: true }),
+  Object.freeze({ id: 'qq.qzone.read', implemented: true }),
+  Object.freeze({ id: 'qq.qzone.publish', implemented: true }),
   Object.freeze({ id: 'dsh.shell', implemented: false }),
 ])
 const KNOWN_CAPABILITIES = new Set(CAPABILITY_CATALOG.map(item => item.id))
 const DIRECTORY_CAPABILITIES = new Set(['qq.friends.read', 'qq.groups.read'])
+const QZONE_CAPABILITIES = new Set(['qq.qzone.use', 'qq.qzone.read', 'qq.qzone.publish'])
+const GROUP_WRITE_CAPABILITIES = new Set(GROUP_WRITE_DEFAULTS)
 const OVERRIDE_VALUES = new Set(['inherit', 'allow', 'deny'])
 const ID_PATTERN = /^[1-9]\d{0,19}$/
 
@@ -115,15 +139,69 @@ export class PermissionEngine {
     const mode = normalized?.mode ?? (scene.kind === 'group' ? this.groupDefaultMode : this.privateDefaultMode)
     const decision = (allowed, reason) => ({ allowed, mode, reason })
     if (this.globalDeny.has(capability)) return decision(false, 'global-deny')
+    if (QZONE_CAPABILITIES.has(capability)) {
+      // A unified revoke must also close the legacy read/publish aliases.
+      for (const related of QZONE_CAPABILITIES) {
+        if (this.globalDeny.has(related)) return decision(false, 'global-deny')
+        if (normalized?.overrides?.[related] === 'deny') return decision(false, 'scene-deny')
+      }
+    }
     const owner = scene.kind === 'private' && this.ownerPrivateIds.has(scene.peerId)
     if (mode === 'owner-agent' && !owner) return decision(false, 'owner-private-required')
     const override = normalized?.overrides?.[capability] ?? 'inherit'
+    if (GROUP_WRITE_CAPABILITIES.has(capability) && scene.kind !== 'group') {
+      return decision(false, 'group-only')
+    }
     if (DIRECTORY_CAPABILITIES.has(capability)) {
       // Account-wide directories are never inherited from the Owner mode and
       // never granted by a non-owner Scene; each call needs an explicit allow on
       // a verified owner private Scene in owner-agent mode.
       if (!owner || mode !== 'owner-agent' || override !== 'allow') {
         return decision(false, 'owner-directory-required')
+      }
+      return decision(true, 'scene-allow')
+    }
+    if (capability === 'qq.owner.tools') {
+      // Native Host tools are available only for a verified owner private
+      // Scene in owner-agent mode; no extra per-tool approval is required.
+      if (!owner || mode !== 'owner-agent' || override === 'deny') {
+        return decision(false, 'owner-tools-required')
+      }
+      return decision(true, 'owner-agent')
+    }
+    if (capability === 'qq.owner.workspace') {
+      // The file surface is never implied by owner-agent mode and is never
+      // reachable from Safe Chat; the Owner must explicitly allow this Scene.
+      if (!owner || mode !== 'owner-agent' || override !== 'allow') {
+        return decision(false, 'owner-workspace-required')
+      }
+      return decision(true, 'scene-allow')
+    }
+    if (capability === 'qq.qzone.use') {
+      // Unified QZone access covers reads and writes, but still requires the
+      // account-level grant and an explicit Scene grant in autonomous-social or
+      // a verified owner private owner-agent Scene.
+      if (override !== 'allow') return decision(false, 'qzone-use-explicit')
+      if (!accountCanPublish(this.accountGrants, scene.botId)) {
+        return decision(false, 'account-publish-required')
+      }
+      if (owner && mode === 'owner-agent') return decision(true, 'scene-allow')
+      if (mode === 'autonomous-social') return decision(true, 'scene-allow')
+      return decision(false, 'qzone-use-explicit')
+    }
+    if (capability === 'qq.qzone.read') {
+      // QZone reads expose account-wide content. Require either an explicit
+      // Owner private grant or an explicitly allowed Autonomous Social Scene.
+      if (override !== 'allow') return decision(false, 'qzone-read-explicit')
+      if (owner && mode === 'owner-agent') return decision(true, 'scene-allow')
+      if (mode === 'autonomous-social') return decision(true, 'scene-allow')
+      return decision(false, 'qzone-read-explicit')
+    }
+    if (capability === 'qq.profile.write') {
+      // Account profile writes are global and require a verified Owner private
+      // Scene, owner-agent mode and an explicit Scene allow.
+      if (!owner || mode !== 'owner-agent' || override !== 'allow') {
+        return decision(false, 'profile-write-explicit')
       }
       return decision(true, 'scene-allow')
     }

@@ -44,7 +44,18 @@ test('a separate search preset uses the existing Host web provider and no person
     '- id: preset-amadeus-qq-search', '- id: qq-web-search', '- id: qq-search-boundary',
     '- id: preset-amadeus-qq-media', '- id: qq-media-boundary',
     '- id: preset-amadeus-qq-media-search', '- id: qq-media-web-search', '- id: qq-media-search-boundary',
+    '- id: preset-amadeus-qq-owner', '- id: qq-owner-boundary',
+    '- id: owner-tool-pwsh', '- id: owner-tool-fs', '- id: owner-tool-fs-search',
+    '- id: owner-tool-jobs', '- id: owner-tool-web',
   ])
   assert.match(active, /id: amadeus-qq-media[\s\S]*?level: 2/)
   assert.match(active, /id: amadeus-qq-media-search[\s\S]*?level: 2/)
+  assert.match(active, /id: amadeus-qq-owner[\s\S]*?presetGuard: true[\s\S]*?level: 4/,
+    'the Owner preset is level 4 and keeps the QQ guard')
+  assert.match(active, /id: amadeus-qq-owner[\s\S]*?@deepseek-ai\/dsh-tool-pwsh/,
+    'the Owner preset mounts the official PowerShell tool')
+  assert.match(active, /id: amadeus-qq-owner[\s\S]*?@deepseek-ai\/dsh-tool-fs/)
+  assert.match(active, /id: amadeus-qq-owner[\s\S]*?@deepseek-ai\/dsh-tool-web/)
+  assert.doesNotMatch(active, /ownerWorkspaceRoot|ownerWorkspaceWrites|ownerWorkspaceMaxBytes/,
+    'the preset must not inject a static Owner workspace root/writes')
 })
