@@ -113,3 +113,21 @@ test('host guard denies every non-QQ tool for persisted QQ Session and tool args
   for (const effect of host.effects.reverse()) effect()
   assert.equal(fs.existsSync(`${statePath}.lock`), false)
 })
+
+test('connector startup failure emits a bounded diagnostic instead of disappearing', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amadeus-qq-startup-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const host = fakeHost()
+  const diagnostics = []
+  host.ctx.logger = { error: message => diagnostics.push(String(message)) }
+  apply(host.ctx, {
+    enabled: true, connect: true,
+    statePath: path.join(dir, 'qq.json'), sessionCwd: dir, agentPreset: 'amadeus-qq',
+    httpUrl: 'invalid', wsUrl: 'invalid',
+  })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(diagnostics.length, 1)
+  assert.match(diagnostics[0], /transport|OneBot/i)
+  assert.ok(!diagnostics[0].includes(dir), 'diagnostic must not expose local state paths')
+  for (const effect of host.effects.reverse()) effect()
+})

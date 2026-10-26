@@ -80,6 +80,27 @@ export function makeDshHost(ctx, config) {
   }
 }
 
+/**
+ * Emit one bounded startup diagnostic. Never include the raw error, URLs,
+ * credentials, state paths, message bodies, or the logger's own failure.
+ * @param {Record<string, unknown>} ctx - plugin context.
+ * @param {'resume'|'transport'} stage - failed startup stage.
+ */
+function reportStartupFailure(ctx, stage) {
+  const message = stage === 'transport'
+    ? 'amadeus-qq: OneBot transport startup failed; connector remains unavailable'
+    : 'amadeus-qq: pending QQ Session resume failed; queued messages remain pending'
+  try {
+    const logger = ctx?.logger
+    if (logger && typeof logger.error === 'function') logger.error(message)
+    else if (logger && typeof logger.warn === 'function') logger.warn(message)
+    else console.error(message)
+  } catch {
+    // Logging must never turn a bounded failure into an unhandled rejection.
+    try { console.error(message) } catch { /* no available diagnostic sink */ }
+  }
+}
+
 export function apply(ctx, config = {}) {
   // The preset rows mount this same package root with `presetGuard: true`.
   // Branch before any connector startup requirement so the guard is owned by
@@ -217,8 +238,12 @@ export function apply(ctx, config = {}) {
     resolveTrustedSessionScene: sessionId => core.trustedSceneForSession(sessionId),
   }))
   ctx.effect(() => () => core.close())
-  void core.resumePending().catch(() => {})
-  void transport.start(event => core.ingest(event)).catch(() => {})
+  void Promise.resolve()
+    .then(() => core.resumePending())
+    .catch(() => reportStartupFailure(ctx, 'resume'))
+  void Promise.resolve()
+    .then(() => transport.start(event => core.ingest(event)))
+    .catch(() => reportStartupFailure(ctx, 'transport'))
   } catch (error) {
     releaseLease()
     throw error
