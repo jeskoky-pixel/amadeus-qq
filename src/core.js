@@ -67,7 +67,7 @@ export class QQCore {
   #shouldPrompt(scene, message, row) {
     if (scene.kind === 'private') return true
     if (message.atIds.includes(scene.botId)) return true
-    if (message.replyToMessageId && row?.deliveries.some(item => item.platformMessageId === message.replyToMessageId && item.status === 'delivered')) return true
+    if (message.replyToMessageId && this.store.hasDelivered(row, message.replyToMessageId)) return true
     const text = messageText(message)
     return this.policy.triggerNames.some(name => text.includes(name))
   }
@@ -119,6 +119,7 @@ export class QQCore {
       const needsPrompt = Boolean(waiter) || this.#shouldPrompt(scene, message, before)
       const inserted = this.store.appendMessage(scene, { ...message, needsPrompt })
       if (inserted.duplicate) return { status: 'duplicate' }
+      if (inserted.dropped) return { status: 'dropped', reason: inserted.dropped }
       const row = this.store.getScene(scene)
       if (waiter && inserted.seq > waiter.afterSeq) {
         waiter.resolve()

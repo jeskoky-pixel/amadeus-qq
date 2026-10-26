@@ -189,3 +189,67 @@ test('reply and mention must resolve inside the bound group scene', async t => {
   assert.equal(f.transport.status, 'mock')
   core.close()
 })
+
+test('pending delivery saturation is diagnosed and passive chatter drops instead of blocking', async t => {
+  const f = fixture(t, { maxMessages: 2 })
+  f.dsh.prompt = async () => { throw new Error('DSH disconnected') }
+  const core = f.make()
+  await assert.rejects(core.ingest(group('101')), /disconnected/)
+  await assert.rejects(core.ingest(group('102')), /disconnected/)
+  await assert.rejects(core.ingest(group('103')), /QQ_QUEUE_FULL: .*pending delivery/)
+  assert.deepEqual(await core.ingest(group('104', '20001', [{ type: 'text', data: { text: 'background' } }])),
+    { status: 'dropped', reason: 'passive_window' })
+  assert.equal(new QQStore(f.file).getScene({ botId, kind: 'group', peerId: '20001' }).messages.length, 2)
+  let prompts = 0
+  f.dsh.prompt = async () => { prompts++; return { accepted: true } }
+  assert.deepEqual(await core.resumePending(), { resumed: 2 })
+  assert.equal((await core.ingest(group('103'))).status, 'prompted')
+  assert.equal(prompts, 3)
+  core.close()
+})
+
+test('saturated outbox refuses only when every action is unknown and never forgets one', async t => {
+  const f = fixture(t, { maxDeliveries: 2, send: async () => { throw new Error('network timeout') } })
+  const core = f.make()
+  const { sessionId } = await core.ingest(privateMessage('301'))
+  const args = n => ({ actionId: `uncertain-${n}`, segments: [{ type: 'text', data: { text: `m${n}` } }] })
+  assert.equal((await core.send(sessionId, args(1))).status, 'unknown')
+  assert.equal((await core.send(sessionId, args(2))).status, 'unknown')
+  const sends = f.events.filter(item => item[0] === 'send').length
+  await assert.rejects(core.send(sessionId, args(3)), /QQ_OUTBOX_FULL: .*unsettled/)
+  assert.equal(f.events.filter(item => item[0] === 'send').length, sends, 'a refused send must not reach the transport')
+  core.close()
+  const restarted = f.make()
+  assert.deepEqual(await restarted.send(sessionId, args(1)), { status: 'unknown', repeated: true, messageId: null })
+  await assert.rejects(restarted.send(sessionId, { ...args(1), segments: [{ type: 'text', data: { text: 'changed' } }] }), /CONFLICT/)
+  restarted.close()
+})
+
+test('rejected sends settle failed, repeat as failed, and reject actionId conflicts', async t => {
+  const send = async () => { const error = new Error('rejected by OneBot'); error.code = 'ONEBOT_REJECTED'; throw error }
+  const f = fixture(t, { send })
+  const core = f.make()
+  const { sessionId } = await core.ingest(privateMessage('301'))
+  const args = { actionId: 'rejected-1', segments: [{ type: 'text', data: { text: 'once' } }] }
+  assert.deepEqual(await core.send(sessionId, args), { status: 'failed', repeated: false, messageId: null })
+  const sends = f.events.filter(item => item[0] === 'send').length
+  assert.deepEqual(await core.send(sessionId, args), { status: 'failed', repeated: true, messageId: null })
+  assert.equal(f.events.filter(item => item[0] === 'send').length, sends, 'failed action must not be resent')
+  await assert.rejects(core.send(sessionId, { ...args, segments: [{ type: 'text', data: { text: 'different' } }] }), /CONFLICT/)
+  core.close()
+})
+
+test('archived successful action remains deduplicated after restart', async t => {
+  const f = fixture(t, { maxDeliveries: 2 })
+  const core = f.make()
+  const { sessionId } = await core.ingest(privateMessage('301'))
+  const args = n => ({ actionId: `archived-${n}`, segments: [{ type: 'text', data: { text: `m${n}` } }] })
+  for (const n of [1, 2, 3]) assert.equal((await core.send(sessionId, args(n))).status, 'delivered')
+  core.close()
+  const restarted = f.make()
+  const replayed = await restarted.send(sessionId, args(1))
+  assert.equal(replayed.repeated, true)
+  assert.equal(replayed.status, 'delivered')
+  await assert.rejects(restarted.send(sessionId, { ...args(1), segments: [{ type: 'text', data: { text: 'changed' } }] }), /CONFLICT/)
+  restarted.close()
+})

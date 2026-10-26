@@ -8,6 +8,8 @@ const MESSAGE_ID_PATTERN = /^-?[1-9]\d{0,19}$/
 const DEFAULT_MAX_MESSAGES = 500
 const DEFAULT_MAX_SEEN = 2048
 const DEFAULT_MAX_DELIVERIES = 500
+const DEFAULT_MAX_ARCHIVED_DELIVERIES = 4096
+const TERMINAL_DELIVERY_STATUSES = new Set(['delivered', 'failed'])
 
 export function normalizeId(value, label = 'id') {
   const text = typeof value === 'number' && Number.isSafeInteger(value) ? String(value) : value
@@ -46,6 +48,15 @@ function clone(value) {
   return structuredClone(value)
 }
 
+/**
+ * A message is protected until DSH delivery has been recorded. Reading it from
+ * the durable inbox does not make an undelivered addressed/wait event safe to
+ * evict: the read waterline can move past it while the prompt is still pending.
+ */
+function isPendingDelivery(message) {
+  return message?.needsPrompt === true && message?.prompted !== true
+}
+
 function validateState(state) {
   if (!state || state.schemaVersion !== SCHEMA_VERSION || !state.scenes || typeof state.scenes !== 'object' || Array.isArray(state.scenes)) {
     throw new Error('QQ state schema is invalid; refusing to reset durable state')
@@ -55,6 +66,35 @@ function validateState(state) {
     if (sceneKey(row) !== key || !Array.isArray(row.messages) || !Array.isArray(row.seenIds) || !Array.isArray(row.deliveries)) {
       throw new Error(`QQ state contains an invalid scene row: ${key}`)
     }
+    if (row.deliveryArchive !== undefined && !Array.isArray(row.deliveryArchive)) {
+      throw new Error(`QQ state contains an invalid delivery archive: ${key}`)
+    }
+    for (const message of row.messages) {
+      if (message.needsPrompt !== undefined && typeof message.needsPrompt !== 'boolean') {
+        throw new Error(`QQ state contains an invalid message delivery flag: ${key}`)
+      }
+    }
+    const actionIds = new Set()
+    for (const delivery of [...row.deliveries, ...(row.deliveryArchive ?? [])]) {
+      if (typeof delivery?.actionId !== 'string' || !/^[\w-]{1,100}$/.test(delivery.actionId)) {
+        throw new Error(`QQ state contains an invalid delivery action: ${key}`)
+      }
+      if (actionIds.has(delivery.actionId)) throw new Error(`QQ state repeats a delivery action: ${key}`)
+      actionIds.add(delivery.actionId)
+      if (typeof delivery.fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(delivery.fingerprint)) {
+        throw new Error(`QQ state contains an invalid delivery fingerprint: ${key}`)
+      }
+      if (!['delivered', 'failed', 'unknown'].includes(delivery.status)) {
+        throw new Error(`QQ state contains an invalid delivery status: ${key}`)
+      }
+    }
+    for (const delivery of row.deliveryArchive ?? []) {
+      // Archived entries are terminal. An unknown action must stay in the live
+      // ledger: moving it would hide an unresolved external write.
+      if (!TERMINAL_DELIVERY_STATUSES.has(delivery.status)) {
+        throw new Error(`QQ state archives an unsettled delivery: ${key}`)
+      }
+    }
     if (row.sessionId !== null && (typeof row.sessionId !== 'string' || !row.sessionId)) {
       throw new Error(`QQ state contains an invalid Session: ${key}`)
     }
@@ -63,6 +103,26 @@ function validateState(state) {
       boundSessions.add(row.sessionId)
     }
   }
+}
+
+/**
+ * Read schema-v1 rows written before the capacity revisions. Missing archives
+ * are empty; a message without an explicit delivery flag is treated as pending
+ * unless it was already prompted, so an upgrade cannot silently drop it.
+ */
+function normalizeLoadedState(state) {
+  if (!state || typeof state !== 'object' || !state.scenes || typeof state.scenes !== 'object' || Array.isArray(state.scenes)) {
+    return state
+  }
+  for (const row of Object.values(state.scenes)) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue
+    row.deliveryArchive ??= []
+    if (!Array.isArray(row.messages)) continue
+    for (const message of row.messages) {
+      if (message.needsPrompt === undefined) message.needsPrompt = message.prompted !== true
+    }
+  }
+  return state
 }
 
 function durableWrite(file, state) {
@@ -99,10 +159,11 @@ export class QQStore {
     this.maxMessages = limits.maxMessages ?? DEFAULT_MAX_MESSAGES
     this.maxSeen = limits.maxSeen ?? DEFAULT_MAX_SEEN
     this.maxDeliveries = limits.maxDeliveries ?? DEFAULT_MAX_DELIVERIES
-    for (const n of [this.maxMessages, this.maxSeen, this.maxDeliveries]) {
+    this.maxArchivedDeliveries = limits.maxArchivedDeliveries ?? DEFAULT_MAX_ARCHIVED_DELIVERIES
+    for (const n of [this.maxMessages, this.maxSeen, this.maxDeliveries, this.maxArchivedDeliveries]) {
       if (!Number.isSafeInteger(n) || n < 1) throw new TypeError('state limits must be positive integers')
     }
-    this.state = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : emptyState()
+    this.state = fs.existsSync(file) ? normalizeLoadedState(JSON.parse(fs.readFileSync(file, 'utf8'))) : emptyState()
     validateState(this.state)
   }
 
@@ -120,7 +181,7 @@ export class QQStore {
   #row(state, identity) {
     const scene = sceneIdentity(identity)
     const key = sceneKey(scene)
-    state.scenes[key] ??= { ...scene, sessionId: null, authEpoch: 0, nextSeq: 1, readSeq: 0, presentedSeq: 0, promptedSeq: 0, messages: [], seenIds: [], deliveries: [] }
+    state.scenes[key] ??= { ...scene, sessionId: null, authEpoch: 0, nextSeq: 1, readSeq: 0, presentedSeq: 0, promptedSeq: 0, messages: [], seenIds: [], deliveries: [], deliveryArchive: [] }
     return state.scenes[key]
   }
 
@@ -180,15 +241,41 @@ export class QQStore {
     })
   }
 
+  /**
+   * Free exactly one message slot. Passive (never-addressed) messages roll off
+   * first as a short-term window; already-read messages are next; messages that
+   * were handed to the model but not read are last. A message still waiting for
+   * delivery is never evicted here.
+   */
+  #evictMessage(row) {
+    let index = row.messages.findIndex(item => item.needsPrompt !== true)
+    if (index < 0) index = row.messages.findIndex(item => item.seq <= row.readSeq && !isPendingDelivery(item))
+    if (index < 0) index = row.messages.findIndex(item => item.prompted === true)
+    if (index < 0) return false
+    row.messages.splice(index, 1)
+    return true
+  }
+
   appendMessage(identity, message) {
     const messageId = normalizeMessageId(message?.messageId, 'messageId')
+    const needsPrompt = message?.needsPrompt === true
     return this.#change(state => {
       const row = this.#row(state, identity)
       if (row.seenIds.includes(messageId)) return { duplicate: true, seq: null }
-      while (row.messages.length >= this.maxMessages && row.messages[0].seq <= row.readSeq) row.messages.shift()
-      if (row.messages.length >= this.maxMessages) throw new Error('QQ_QUEUE_FULL: unread message limit reached')
+      while (row.messages.length >= this.maxMessages && this.#evictMessage(row)) {}
+      if (row.messages.length >= this.maxMessages) {
+        // Do not advance nextSeq and do not invent a slot: a protected message
+        // that cannot be retained must be reported, not silently lost.
+        if (needsPrompt) {
+          const pending = row.messages.filter(isPendingDelivery).length
+          throw new Error(`QQ_QUEUE_FULL: ${row.messages.length}/${this.maxMessages} messages retained, ${pending} pending delivery; acknowledge or read earlier messages first`)
+        }
+        row.seenIds.push(messageId)
+        if (row.seenIds.length > this.maxSeen) row.seenIds.splice(0, row.seenIds.length - this.maxSeen)
+        return { duplicate: false, seq: null, dropped: 'passive_window' }
+      }
       const seq = row.nextSeq++
-      row.messages.push({ ...clone(message), messageId, seq, prompted: false })
+      row.messages.push({ ...clone(message), messageId, seq, needsPrompt, prompted: false })
       row.seenIds.push(messageId)
       if (row.seenIds.length > this.maxSeen) row.seenIds.splice(0, row.seenIds.length - this.maxSeen)
       return { duplicate: false, seq }
@@ -216,18 +303,40 @@ export class QQStore {
     })
   }
 
+  hasDelivered(identity, platformMessageId) {
+    const row = this.state.scenes[sceneKey(identity)]
+    if (!row) return false
+    return [...row.deliveries, ...(row.deliveryArchive ?? [])]
+      .some(item => item.status === 'delivered' && item.platformMessageId === platformMessageId)
+  }
+
   reserveDelivery(identity, actionId, fingerprint) {
     if (typeof actionId !== 'string' || !/^[\w-]{1,100}$/.test(actionId)) throw new TypeError('invalid actionId')
     if (typeof fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(fingerprint)) throw new TypeError('invalid fingerprint')
     return this.#change(state => {
       const row = this.#row(state, identity)
-      const prior = row.deliveries.find(item => item.actionId === actionId)
+      const prior = row.deliveries.find(item => item.actionId === actionId) ??
+        row.deliveryArchive.find(item => item.actionId === actionId)
       if (prior) {
         if (prior.fingerprint !== fingerprint) throw new Error('QQ_ACTION_CONFLICT: actionId reused with different content')
         return { fresh: false, delivery: clone(prior) }
       }
-      // Never prune an action ID silently: that would permit a later duplicate send.
-      if (row.deliveries.length >= this.maxDeliveries) throw new Error('QQ_OUTBOX_FULL: action ledger requires maintenance')
+      if (row.deliveries.length >= this.maxDeliveries) {
+        // Only terminal actions may leave the live ledger. Unknown actions keep
+        // an unresolved external write; forgetting one would permit a blind retry.
+        const index = row.deliveries.findIndex(item => TERMINAL_DELIVERY_STATUSES.has(item.status))
+        if (index < 0) {
+          const unsettled = row.deliveries.filter(item => item.status === 'unknown').length
+          throw new Error(`QQ_OUTBOX_FULL: ${row.deliveries.length}/${this.maxDeliveries} actions are unsettled (${unsettled} unknown); refusing to forget an in-flight send`)
+        }
+        const [archived] = row.deliveries.splice(index, 1)
+        // Terminal actions move to a bounded archive. The newest terminal
+        // actionIds keep deduplicating across restarts; the oldest expire after
+        // maxArchivedDeliveries newer settlements and may be sent again in a far
+        // later activity. This is bounded retry protection, not exactly-once.
+        row.deliveryArchive.push({ ...archived, archivedAt: Date.now() })
+        while (row.deliveryArchive.length > this.maxArchivedDeliveries) row.deliveryArchive.shift()
+      }
       const delivery = { actionId, fingerprint, status: 'unknown', platformMessageId: null, updatedAt: Date.now() }
       row.deliveries.push(delivery)
       return { fresh: true, delivery: clone(delivery) }
