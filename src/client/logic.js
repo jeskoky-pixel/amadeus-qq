@@ -91,10 +91,68 @@ async function readPayload(response) {
   if (!response.ok || !payload || payload.ok !== true) {
     const error = new Error(payload && payload.error ? payload.error : 'HTTP ' + response.status)
     error.status = response.status
+    if (typeof payload?.code === 'string') error.code = payload.code
     if (response.status === 409) error.conflict = true
     throw error
   }
   return payload.data
+}
+
+/**
+ * True only when the management surface is genuinely unusable for this page:
+ * authentication/owner admission failed, or the Host lacks the management
+ * service. Only the explicitly listed policy rejections and session-cancel
+ * failures stay editable; any unknown code falls back to its HTTP status so an
+ * unrecognized 401/403/503 keeps the editor locked (fail closed).
+ */
+const EDITABLE_FAILURE_CODES = new Set([
+  'QQ_OWNER_AGENT_FORBIDDEN',
+  'QQ_SCENE_UNAUTHORIZED',
+  'QQ_SESSION_CANCEL_FAILED',
+  'QQ_SESSION_CANCEL_UNAVAILABLE',
+  'QQ_PERMISSION_CONFLICT',
+])
+
+export function requiresReadOnly(error) {
+  const code = typeof error?.code === 'string' ? error.code : ''
+  if (code === 'QQ_AUTH_REQUIRED' || code === 'QQ_MANAGEMENT_UNAVAILABLE') return true
+  if (EDITABLE_FAILURE_CODES.has(code)) return false
+  const status = Number(error?.status)
+  return status === 401 || status === 403 || status === 503
+}
+
+/** Fixed Chinese guidance per management failure code; never echoes server internals. */
+export function managementErrorMessage(error) {
+  const code = typeof error?.code === 'string' ? error.code : ''
+  if (code === 'QQ_PERMISSION_CONFLICT' || error?.status === 409) {
+    return '权限已被其他窗口修改（409）；请重新加载后再编辑。'
+  }
+  if (code === 'QQ_AUTH_REQUIRED') {
+    return '当前请求没有通过 DSH 认证或 Owner 授权；请从已认证的 DSH 页面访问。'
+  }
+  if (code === 'QQ_MANAGEMENT_UNAVAILABLE') {
+    return '管理接口不可用；QQ 插件可能未启用或缺少 Host 服务。'
+  }
+  if (code === 'QQ_OWNER_AGENT_FORBIDDEN') {
+    return 'Owner Agent 仅可用于已配置的可信 Owner 私聊；当前场景或配置不允许保存该模式。'
+  }
+  if (code === 'QQ_SCENE_UNAUTHORIZED') {
+    return '该场景已不在 QQ 允许列表内；请更新配置并刷新后再操作。'
+  }
+  if (code === 'QQ_SESSION_CANCEL_FAILED' || code === 'QQ_SESSION_CANCEL_UNAVAILABLE') {
+    return '权限可能已写入，但旧 QQ Session 未能安全取消；请刷新确认最新 revision 后再编辑。'
+  }
+  if (code === 'QQ_REQUEST_INVALID') {
+    return '管理请求无效；请刷新后重试。'
+  }
+  const status = Number(error?.status)
+  if (status === 401 || status === 403) {
+    return '当前请求没有通过 DSH 认证或 Owner 授权（HTTP ' + status + '）；请从已认证的 DSH 页面访问。'
+  }
+  if (status === 503) {
+    return '管理接口不可用（503）；QQ 插件可能未启用或缺少 Host 服务。'
+  }
+  return 'QQ 管理请求失败' + (Number.isInteger(status) ? '（HTTP ' + status + '）' : '')
 }
 
 export async function fetchScenes(fetchImpl = fetch) {

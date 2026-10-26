@@ -1,5 +1,9 @@
 # amadeus-qq 交接
 
+## 当前检查点（2026-10-26，QA.49 可靠性与内联语音）
+
+原三个持久官方 DeepSeek Flash Creator 会话继续复用。Codex 的失败回归推动了 `unknown` 投递同内容新 `actionId` 的持久原子拦截、OneBot 有界内联 canonical WAV 读取，以及管理 API/GUI 错误归因；Codex 复审后补修未知 403 的保守只读规则。`npm test` 为 139 通过、0 失败、2 项 Windows 符号链接跳过。QA.49 官方隔离 DSH Desktop 通过真实模型工具调用、本机模拟 OneBot 内联合成 WAV、官方 SenseVoice 转写、撤权拒绝和重启后 Safe Chat 持久性；详见 `docs/verification/QA49_RELIABILITY_INLINE_AUDIO_GUI_2026-10-26.md`。隔离 Profile 已恢复 `connect:false`，语音 Bundle 停用，模拟端口关闭。真实 NapCat、媒体发送、QQ 空间、完整 Owner Agent 与生态联动仍未验收；PR #1 保持 Draft，不可部署。
+
 ## 当前检查点（2026-10-26，本地语音转写与能力状态）
 
 新增受 Scene 约束的本地 record→SenseVoice 转写工具；Owner Agent / 自主社交未实现能力不再显示为运行时有效，GUI 明示部分功能待实现。134 项测试中 132 通过、2 项因 Windows 符号链接权限跳过。QA.48 在隔离官方 DSH Desktop 中以本机合成语音和模拟 OneBot 完成真实模型工具调用及本地 ASR；撤权后旧 Session 被拒绝。隔离 Host 已恢复 `connect:false`，语音 Bundle 停用。详见 `docs/verification/LOCAL_RECORD_ASR_2026-10-26.md`。真实 NapCat、真实 QQ、媒体发送和通用 Owner Agent 仍未验收，PR #1 保持 Draft。

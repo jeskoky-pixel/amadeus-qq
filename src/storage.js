@@ -379,6 +379,12 @@ export class QQStore {
         if (prior.fingerprint !== fingerprint) throw new Error('QQ_ACTION_CONFLICT: actionId reused with different content')
         return { fresh: false, delivery: clone(prior) }
       }
+      // A different actionId must not retry bytes whose earlier send has an
+      // unresolved outcome. This check runs inside the serialized state change
+      // so two concurrent new actionIds cannot both pass before either writes.
+      if (row.deliveries.some(item => item.status === 'unknown' && item.fingerprint === fingerprint)) {
+        throw new Error('QQ_DELIVERY_UNRESOLVED: identical content already has an unknown delivery')
+      }
       if (row.deliveries.length >= this.maxDeliveries) {
         // Only terminal actions may leave the live ledger. Unknown actions keep
         // an unresolved external write; forgetting one would permit a blind retry.

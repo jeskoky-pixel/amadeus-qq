@@ -39,8 +39,8 @@ function fixture(t) {
     { type: 'record', data: { file: 'opaque-record-701' } },
   ] })
   const calls = []
-  const transport = { status: 'connected', async action(name, args, timeoutMs) {
-    calls.push({ name, args, timeoutMs })
+  const transport = { status: 'connected', async action(name, args, timeoutMs, maxResponseBytes) {
+    calls.push({ name, args, timeoutMs, maxResponseBytes })
     return { file: audioPath, url: 'https://must-not-fetch.invalid/record' }
   }, stop() {} }
   const asrCalls = []
@@ -60,13 +60,33 @@ function fixture(t) {
 test('record transcription uses only stored Scene handle and explicitly selected local ASR', async t => {
   const { read, calls, asrCalls, audioPath } = fixture(t)
   const result = await read()
-  assert.deepEqual(calls, [{ name: 'get_record', args: { file: 'opaque-record-701', out_format: 'wav' }, timeoutMs: 10000 }])
+  assert.equal(calls.length, 1)
+  assert.deepEqual({ name: calls[0].name, args: calls[0].args, timeoutMs: calls[0].timeoutMs },
+    { name: 'get_record', args: { file: 'opaque-record-701', out_format: 'wav' }, timeoutMs: 10000 })
+  assert.ok(Number.isSafeInteger(calls[0].maxResponseBytes) && calls[0].maxResponseBytes <= 6 * 1024 * 1024,
+    'the OneBot record response must be bounded before parsing inline bytes')
   assert.deepEqual(result, { text: 'synthetic transcript' })
   assert.equal(asrCalls[0].method, 'resolve')
   assert.equal(asrCalls[0].spec.providerId, 'local-qa')
   assert.deepEqual(Buffer.from(asrCalls[0].spec.audio), wav())
   assert.equal(asrCalls[1].method, 'transcribe')
   assert.equal(JSON.stringify(result).includes(audioPath), false)
+})
+
+test('record transcription accepts bounded canonical WAV bytes returned inline by OneBot', async t => {
+  const { read, transport, asrCalls } = fixture(t)
+  transport.action = async () => ({ base64: wav().toString('base64'), url: 'https://must-not-fetch.invalid/record' })
+  assert.deepEqual(await read(), { text: 'synthetic transcript' })
+  assert.deepEqual(Buffer.from(asrCalls[0].spec.audio), wav())
+})
+
+test('record transcription rejects malformed or oversized inline bytes before ASR', async t => {
+  const { read, transport, asrCalls } = fixture(t)
+  transport.action = async () => ({ base64: wav().toString('base64') + '$' })
+  await assert.rejects(read(), /QQ_MEDIA/)
+  transport.action = async () => ({ base64: Buffer.alloc(4 * 1024 * 1024 + 1).toString('base64') })
+  await assert.rejects(read(), /QQ_MEDIA/)
+  assert.equal(asrCalls.length, 0)
 })
 
 test('record transcription rejects foreign Scene, missing record and revoked media permission before OneBot', async t => {

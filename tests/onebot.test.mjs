@@ -85,6 +85,15 @@ test('adapter sends only a selected OneBot action and classifies platform reject
   assert.equal(new OneBotAdapter().status, 'disabled')
 })
 
+test('record action rejects a response body above its explicit byte limit before JSON parsing', async () => {
+  const adapter = new OneBotAdapter({ enabled: true, httpUrl: 'http://127.0.0.1:12345' }, {
+    fetch: async () => new Response(JSON.stringify({ status: 'ok', retcode: 0,
+      data: { base64: 'A'.repeat(2000) } }), { status: 200 }),
+  })
+  await assert.rejects(adapter.action('get_record', { file: 'opaque', out_format: 'wav' }, 1000, 500),
+    /ONEBOT_RESPONSE_TOO_LARGE/)
+})
+
 test('rejected inbound processing emits a bounded diagnostic without private event content', async () => {
   const socket = new EventEmitter()
   const diagnostics = []

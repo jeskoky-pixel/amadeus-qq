@@ -71,13 +71,6 @@ function capabilityLabel(id) {
   return CAPABILITY_LABELS[id] || id
 }
 
-function friendlyError(error) {
-  if (error?.status === 403) return '当前请求没有通过 DSH Owner 验证（403）；请从已认证的 DSH 页面访问。'
-  if (error?.status === 503) return '管理接口不可用（503）；QQ 插件可能未启用或缺少 Host 服务。'
-  if (error?.status === 409) return '权限已被其他窗口修改（409）；请重新加载后再编辑。'
-  return error?.message ? String(error.message) : '未知错误'
-}
-
 function Panel() {
   const [data, setData] = React.useState(null)
   const [loading, setLoading] = React.useState(true)
@@ -133,7 +126,7 @@ function Panel() {
     } catch (failure) {
       if (seq !== loadSeq.current) return
       setError(failure)
-      setReadOnly(failure.status === 403 || failure.status === 503)
+      setReadOnly(requiresReadOnly(failure))
     } finally {
       if (seq === loadSeq.current) setLoading(false)
     }
@@ -225,7 +218,7 @@ function Panel() {
         setError(null)
       } else {
         setError(failure)
-        if (failure.status === 403 || failure.status === 503) setReadOnly(true)
+        if (requiresReadOnly(failure)) setReadOnly(true)
       }
     } finally {
       setBusy(false)
@@ -284,7 +277,7 @@ function Panel() {
       React.createElement('span', { className: 'chip' }, '活跃等待：' + (health?.activeWaits ?? 0)),
     ),
     readOnly ? React.createElement('div', { className: 'message error' }, '此页面为只读：当前请求没有通过 DSH Owner 验证，或管理接口不可用。仅本机访问不等于管理员授权。') : null,
-    error ? React.createElement('div', { className: 'message error', role: 'alert' }, '读取或保存失败：' + friendlyError(error)) : null,
+    error ? React.createElement('div', { className: 'message error', role: 'alert' }, '读取或保存失败：' + managementErrorMessage(error)) : null,
     notice ? React.createElement('div', { className: 'message success', role: 'status' }, notice) : null,
     selectionHint ? React.createElement('div', { className: 'message error', role: 'alert' }, selectionHint) : null,
     loading && !data ? React.createElement('p', { role: 'status' }, '正在读取 QQ 场景…') : null,

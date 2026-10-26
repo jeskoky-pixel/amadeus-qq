@@ -58,27 +58,39 @@ function send(res, status, payload) {
 }
 
 /**
+ * Fixed, non-reflective management failure. The client uses `code` to decide
+ * whether the page must become read-only, so codes are part of the contract.
+ * @param {import('node:http').ServerResponse} res
+ * @param {number} status
+ * @param {string} code fixed machine code.
+ * @param {string} message fixed human message; never exception/scene content.
+ */
+function fail(res, status, code, message) {
+  return send(res, status, { ok: false, code, error: message })
+}
+
+/**
  * @param {Record<string, unknown>} connection - DSH Connection service.
  * @param {Record<string, unknown>} req - incoming request.
  * @returns {{ok: true}|{ok: false, status: number, message: string}} decision.
  */
 export function authorizeRequest(connection, req) {
   if (!connection || typeof connection.admit !== 'function') {
-    return { ok: false, status: 503, message: 'native QQ management requires the DSH Connection service' }
+    return { ok: false, status: 503, code: 'QQ_MANAGEMENT_UNAVAILABLE', message: 'native QQ management requires the DSH Connection service' }
   }
   let admission
   try {
     admission = connection.admit(req)
   } catch {
-    return { ok: false, status: 403, message: 'request authentication failed' }
+    return { ok: false, status: 403, code: 'QQ_AUTH_REQUIRED', message: 'request authentication failed' }
   }
   if (!admission || admission.rejection !== undefined) {
     const rejection = Number(admission?.rejection)
     const status = Number.isInteger(rejection) && rejection >= 400 && rejection <= 599 ? rejection : 403
-    return { ok: false, status, message: 'DSH authentication is required' }
+    return { ok: false, status, code: 'QQ_AUTH_REQUIRED', message: 'DSH authentication is required' }
   }
   if (admission?.peer?.principal?.kind !== 'owner') {
-    return { ok: false, status: 403, message: 'only the authenticated owner may manage QQ Scenes' }
+    return { ok: false, status: 403, code: 'QQ_AUTH_REQUIRED', message: 'only the authenticated owner may manage QQ Scenes' }
   }
   return { ok: true }
 }
@@ -147,24 +159,27 @@ function sendFailure(res, error) {
   if (error?.code === 'QQ_PERMISSION_CONFLICT') {
     return send(res, 409, {
       ok: false,
-      error: 'Scene permissions changed; reload before retrying',
       code: 'QQ_PERMISSION_CONFLICT',
+      error: 'Scene permissions changed; reload before retrying',
       currentRevision: error.currentRevision,
     })
   }
-  if (error instanceof RequestError) return send(res, error.status, { ok: false, error: error.message })
-  if (error instanceof TypeError) return send(res, 400, { ok: false, error: 'invalid Scene or permission request' })
   if (error?.code === 'QQ_OWNER_AGENT_FORBIDDEN') {
-    return send(res, 403, { ok: false, error: 'owner-agent is limited to a configured owner private Scene' })
+    return fail(res, 403, 'QQ_OWNER_AGENT_FORBIDDEN', 'owner-agent is limited to a configured owner private Scene')
   }
+  if (error instanceof RequestError) return fail(res, error.status, 'QQ_REQUEST_INVALID', error.message)
+  if (error instanceof TypeError) return fail(res, 400, 'QQ_REQUEST_INVALID', 'invalid Scene or permission request')
   const message = String(error?.message ?? '')
   if (message.startsWith('QQ_UNAUTHORIZED')) {
-    return send(res, 403, { ok: false, error: 'Scene is outside the configured allowlist' })
+    return fail(res, 403, 'QQ_SCENE_UNAUTHORIZED', 'Scene is outside the configured allowlist')
   }
-  if (message === 'QQ_SESSION_CANCEL_UNAVAILABLE' || message === 'QQ_SESSION_CANCEL_FAILED') {
-    return send(res, 503, { ok: false, error: 'the previous QQ Session could not be cancelled safely' })
+  if (message === 'QQ_SESSION_CANCEL_UNAVAILABLE') {
+    return fail(res, 503, 'QQ_SESSION_CANCEL_UNAVAILABLE', 'the previous QQ Session could not be cancelled safely')
   }
-  return send(res, 500, { ok: false, error: 'QQ management request failed' })
+  if (message === 'QQ_SESSION_CANCEL_FAILED') {
+    return fail(res, 503, 'QQ_SESSION_CANCEL_FAILED', 'the previous QQ Session could not be cancelled safely')
+  }
+  return fail(res, 500, 'QQ_MANAGEMENT_FAILED', 'QQ management request failed')
 }
 
 /**
@@ -180,30 +195,30 @@ export function createAdminHandler(core, connection) {
   return async function adminHandler(req, res) {
     const url = new URL(String(req?.url ?? '/'), 'http://localhost')
     if (!url.pathname.startsWith(ADMIN_PREFIX)) {
-      return send(res, 404, { ok: false, error: 'not found' })
+      return fail(res, 404, 'QQ_ENDPOINT_UNKNOWN', 'not found')
     }
-    if (!sameOrigin(req)) return send(res, 403, { ok: false, error: 'same-origin request required' })
+    if (!sameOrigin(req)) return fail(res, 403, 'QQ_AUTH_REQUIRED', 'same-origin request required')
     if (req.method === 'POST' && req.headers?.['x-amadeus-qq'] !== '1') {
-      return send(res, 403, { ok: false, error: 'missing QQ management request marker' })
+      return fail(res, 403, 'QQ_AUTH_REQUIRED', 'missing QQ management request marker')
     }
     const auth = authorizeRequest(connection, req)
-    if (!auth.ok) return send(res, auth.status, { ok: false, error: auth.message })
+    if (!auth.ok) return send(res, auth.status, { ok: false, code: auth.code, error: auth.message })
 
     const path = url.pathname.slice(ADMIN_PREFIX.length) || '/'
     if (req.method === 'GET') {
-      if (path !== '/scenes') return send(res, 404, { ok: false, error: 'unknown QQ management endpoint' })
+      if (path !== '/scenes') return fail(res, 404, 'QQ_ENDPOINT_UNKNOWN', 'unknown QQ management endpoint')
       try {
         return send(res, 200, {
           ok: true,
           data: { scenes: core.listScenePermissions(), health: core.health(), modes: [...MODE_IDS] },
         })
       } catch {
-        return send(res, 500, { ok: false, error: 'QQ management request failed' })
+        return fail(res, 500, 'QQ_MANAGEMENT_FAILED', 'QQ management request failed')
       }
     }
-    if (req.method !== 'POST') return send(res, 405, { ok: false, error: 'method not allowed' })
+    if (req.method !== 'POST') return fail(res, 405, 'QQ_METHOD_NOT_ALLOWED', 'method not allowed')
     if (path !== '/scenes/permissions') {
-      return send(res, 404, { ok: false, error: 'unknown QQ management endpoint' })
+      return fail(res, 404, 'QQ_ENDPOINT_UNKNOWN', 'unknown QQ management endpoint')
     }
     let body
     try {

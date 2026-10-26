@@ -6,6 +6,8 @@ import {
   fetchScenes,
   isDraftDirty,
   nextDraftForSelection,
+  managementErrorMessage,
+  requiresReadOnly,
   savePermissions,
   validateDraft,
 } from '../src/client/logic.js'
@@ -124,4 +126,32 @@ test('fetchScenes uses same-origin GET and the QQ marker', async () => {
   assert.equal(seen.init.credentials, 'same-origin')
   assert.equal(seen.init.headers['x-amadeus-qq'], '1')
   assert.deepEqual(data, { scenes: [], health: {}, modes: [] })
+})
+
+test('management failures preserve codes and distinguish authentication from policy or cancellation failure', async () => {
+  const source = entry()
+  const draft = draftFromEntry(source)
+  const failing = (status, code) => async () => ({
+    ok: false, status, json: async () => ({ ok: false, code, error: 'server error' }),
+  })
+  const capture = async (status, code) => {
+    try { await savePermissions(source, draft, failing(status, code)) } catch (error) { return error }
+    assert.fail('expected the management request to fail')
+  }
+
+  const policy = await capture(403, 'QQ_OWNER_AGENT_FORBIDDEN')
+  assert.equal(policy.code, 'QQ_OWNER_AGENT_FORBIDDEN')
+  assert.equal(requiresReadOnly(policy), false)
+  assert.match(managementErrorMessage(policy), /Owner Agent/)
+
+  const cancel = await capture(503, 'QQ_SESSION_CANCEL_FAILED')
+  assert.equal(cancel.code, 'QQ_SESSION_CANCEL_FAILED')
+  assert.equal(requiresReadOnly(cancel), false)
+  assert.match(managementErrorMessage(cancel), /权限.*写入|刷新.*确认/)
+
+  assert.equal(requiresReadOnly(await capture(401, 'QQ_AUTH_REQUIRED')), true)
+  assert.equal(requiresReadOnly(await capture(403, 'QQ_AUTH_REQUIRED')), true)
+  assert.equal(requiresReadOnly(await capture(503, 'QQ_MANAGEMENT_UNAVAILABLE')), true)
+  assert.equal(requiresReadOnly(await capture(403, 'QQ_NEW_UNRECOGNIZED_FAILURE')), true,
+    'an unknown 403 code must not silently leave the editor writable')
 })

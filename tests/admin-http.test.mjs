@@ -44,9 +44,13 @@ test('native QQ management requires a DSH owner admission and same-origin write 
 
   const write = { scene, access: { mode: 'observe', overrides: {} }, expectedRevision: 0 }
   const noConnection = createAdminHandler(core, undefined)
-  assert.equal((await invoke(noConnection, 'POST', '/api/amadeus-qq/scenes/permissions', write)).status, 503)
+  const unavailable = await invoke(noConnection, 'POST', '/api/amadeus-qq/scenes/permissions', write)
+  assert.equal(unavailable.status, 503)
+  assert.equal(unavailable.body.code, 'QQ_MANAGEMENT_UNAVAILABLE')
   const nonOwner = createAdminHandler(core, { admit: () => ({ peer: { principal: { kind: 'guest' } } }) })
-  assert.equal((await invoke(nonOwner, 'POST', '/api/amadeus-qq/scenes/permissions', write)).status, 403)
+  const refused = await invoke(nonOwner, 'POST', '/api/amadeus-qq/scenes/permissions', write)
+  assert.equal(refused.status, 403)
+  assert.equal(refused.body.code, 'QQ_AUTH_REQUIRED')
   const owner = createAdminHandler(core, { admit: () => ({ peer: { principal: { kind: 'owner' } } }) })
   assert.equal((await invoke(owner, 'POST', '/api/amadeus-qq/scenes/permissions', write,
     { origin: 'http://attacker.invalid' })).status, 403)
@@ -54,9 +58,11 @@ test('native QQ management requires a DSH owner admission and same-origin write 
     { 'x-amadeus-qq': undefined })).status, 403)
   assert.equal(store.getScenePermissions(scene), null, 'refused requests cannot mutate permissions')
 
-  assert.equal((await invoke(owner, 'POST', '/api/amadeus-qq/scenes/permissions', {
+  const ownerForbidden = await invoke(owner, 'POST', '/api/amadeus-qq/scenes/permissions', {
     scene, access: { mode: 'owner-agent', overrides: {} }, expectedRevision: 0,
-  })).status, 403, 'a group cannot be configured as an Owner Agent Scene')
+  })
+  assert.equal(ownerForbidden.status, 403, 'a group cannot be configured as an Owner Agent Scene')
+  assert.equal(ownerForbidden.body.code, 'QQ_OWNER_AGENT_FORBIDDEN')
   assert.equal(store.getScenePermissions(scene), null)
 
   const listed = await invoke(owner, 'GET', '/api/amadeus-qq/scenes')
@@ -68,4 +74,16 @@ test('native QQ management requires a DSH owner admission and same-origin write 
   assert.equal(store.getScenePermissions(scene).mode, 'observe')
   assert.equal((await invoke(owner, 'POST', '/api/amadeus-qq/scenes/permissions', write)).status, 409,
     'stale GUI windows must not silently overwrite the current Scene policy')
+})
+
+test('failed cancellation has a distinct management error code', async () => {
+  const owner = { admit: () => ({ peer: { principal: { kind: 'owner' } } }) }
+  const core = { listScenePermissions: () => [], health: () => ({}),
+    setScenePermissions: async () => { throw new Error('QQ_SESSION_CANCEL_FAILED') } }
+  const handler = createAdminHandler(core, owner)
+  const response = await invoke(handler, 'POST', '/api/amadeus-qq/scenes/permissions', {
+    scene, access: { mode: 'observe', overrides: {} }, expectedRevision: 0,
+  })
+  assert.equal(response.status, 503)
+  assert.equal(response.body.code, 'QQ_SESSION_CANCEL_FAILED')
 })

@@ -187,6 +187,53 @@ test('unknown delivery remains unknown across restart and actionId cannot send t
   core.close()
 })
 
+test('unknown delivery blocks a new actionId with identical content across restart', async t => {
+  let sendCount = 0
+  const f = fixture(t, { send: async () => { sendCount++; throw new Error('network timeout after request') } })
+  let core = f.make()
+  const { sessionId } = await core.ingest(privateMessage('301'))
+  const segments = [{ type: 'text', data: { text: 'ambiguous delivery' } }]
+  const first = { actionId: 'uncertain-a', segments }
+  assert.equal((await core.send(sessionId, first)).status, 'unknown')
+  await assert.rejects(core.send(sessionId, { actionId: 'uncertain-b', segments }), /QQ_DELIVERY_UNRESOLVED/)
+  assert.equal(sendCount, 1)
+  assert.equal(new QQStore(f.file).getScene({ botId, kind: 'private', peerId: '30001' }).deliveries.length, 1,
+    'a refused new action must not reserve another ledger entry')
+  core.close()
+
+  core = f.make()
+  assert.deepEqual(await core.send(sessionId, first), { status: 'unknown', repeated: true, messageId: null })
+  await assert.rejects(core.send(sessionId, { actionId: 'uncertain-c', segments }), /QQ_DELIVERY_UNRESOLVED/)
+  assert.equal(sendCount, 1)
+  assert.equal((await core.send(sessionId, { actionId: 'different-content',
+    segments: [{ type: 'text', data: { text: 'a different message' } }] })).status, 'unknown')
+  assert.equal(sendCount, 2, 'a distinct message is not blocked by the prior unknown delivery')
+  core.close()
+})
+
+test('an in-flight unknown reservation blocks another actionId with identical content', async t => {
+  let releaseSend
+  let sendCount = 0
+  const f = fixture(t, { send: () => {
+    sendCount++
+    return sendCount === 1 ? new Promise(resolve => { releaseSend = resolve }) : Promise.resolve({ messageId: '90003' })
+  } })
+  const core = f.make()
+  const { sessionId } = await core.ingest(privateMessage('301'))
+  const segments = [{ type: 'text', data: { text: 'in flight' } }]
+  const pending = core.send(sessionId, { actionId: 'in-flight-a', segments })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(sendCount, 1)
+  try {
+    await assert.rejects(core.send(sessionId, { actionId: 'in-flight-b', segments }), /QQ_DELIVERY_UNRESOLVED/)
+    assert.equal(sendCount, 1)
+  } finally {
+    releaseSend({ messageId: '90002' })
+    await pending
+  }
+  core.close()
+})
+
 test('restart reuses persisted Session and replays an unaccepted prompt with stable requestId', async t => {
   const f = fixture(t)
   const originalPrompt = f.dsh.prompt

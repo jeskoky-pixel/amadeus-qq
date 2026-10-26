@@ -158,6 +158,45 @@ export function validateOutgoingSegments(raw) {
   })
 }
 
+function responseTooLarge() {
+  const error = new Error('ONEBOT_RESPONSE_TOO_LARGE')
+  error.code = 'ONEBOT_RESPONSE_TOO_LARGE'
+  return error
+}
+
+async function readBoundedJson(response, maxBytes) {
+  const declared = response.headers?.get?.('content-length')
+  if (declared !== null && declared !== undefined) {
+    const length = Number(declared)
+    if (Number.isFinite(length) && length > maxBytes) {
+      try { await response.body?.cancel?.() } catch { /* best effort */ }
+      throw responseTooLarge()
+    }
+  }
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    throw new Error('ONEBOT_RESPONSE_UNSUPPORTED')
+  }
+  const reader = response.body.getReader()
+  const chunks = []
+  let total = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      const chunk = Buffer.from(value)
+      total += chunk.length
+      if (total > maxBytes) {
+        try { await reader.cancel() } catch { /* best effort */ }
+        throw responseTooLarge()
+      }
+      chunks.push(chunk)
+    }
+  } finally {
+    try { reader.releaseLock() } catch { /* already closed */ }
+  }
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'))
+}
+
 export class OneBotAdapter {
   constructor(config = {}, dependencies = {}) {
     this.config = config
@@ -258,9 +297,13 @@ export class OneBotAdapter {
     this.reconnectTimer.unref?.()
   }
 
-  async action(name, params, timeoutMs = 10_000) {
+  async action(name, params, timeoutMs = 10_000, maxResponseBytes = undefined) {
     if (this.config.enabled !== true) throw new Error('OneBot transport is disabled')
     if (!/^[a-z][a-z0-9_]{1,80}$/.test(name)) throw new TypeError('invalid OneBot action')
+    if (maxResponseBytes !== undefined &&
+      (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes < 1)) {
+      throw new TypeError('maxResponseBytes must be a positive safe integer')
+    }
     const url = new URL(name, `${this.config.httpUrl.replace(/\/+$/, '')}/`)
     const response = await this.fetch(url, {
       method: 'POST',
@@ -268,7 +311,9 @@ export class OneBotAdapter {
       body: JSON.stringify(params),
       signal: AbortSignal.timeout(timeoutMs),
     })
-    const result = await response.json()
+    const result = maxResponseBytes === undefined
+      ? await response.json()
+      : await readBoundedJson(response, maxResponseBytes)
     if (!response.ok || !plainObject(result) || result.status !== 'ok' || result.retcode !== 0) {
       const error = new Error(`OneBot action ${name} rejected`)
       error.code = 'ONEBOT_REJECTED'

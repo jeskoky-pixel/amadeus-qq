@@ -4,6 +4,8 @@ import { normalizeMessageId } from './storage.js'
 import { sanitizeInboundSegments } from './onebot.js'
 
 const MAX_AUDIO_BYTES = 4 * 1024 * 1024
+const MAX_RESPONSE_BYTES = 6 * 1024 * 1024
+const MAX_BASE64_CHARS = Math.ceil(MAX_AUDIO_BYTES / 3) * 4
 const MAX_DURATION_SECONDS = 120
 const READ_TIMEOUT_MS = 5_000
 const PLATFORM_TIMEOUT_MS = 10_000
@@ -127,6 +129,24 @@ async function readBoundedAudio(file) {
   }
 }
 
+function decodeInlineWav(value) {
+  if (typeof value !== 'string' || value.length === 0) throw mediaError('QQ_MEDIA_INLINE_INVALID')
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value) || /^data:/i.test(value)) {
+    throw mediaError('QQ_MEDIA_INLINE_INVALID')
+  }
+  if (value.length > MAX_BASE64_CHARS) throw mediaError('QQ_MEDIA_INLINE_TOO_LARGE')
+  let data
+  try {
+    data = Buffer.from(value, 'base64')
+  } catch {
+    throw mediaError('QQ_MEDIA_INLINE_INVALID')
+  }
+  if (data.length === 0) throw mediaError('QQ_MEDIA_INLINE_INVALID')
+  if (data.length > MAX_AUDIO_BYTES) throw mediaError('QQ_MEDIA_INLINE_TOO_LARGE')
+  if (data.toString('base64') !== value) throw mediaError('QQ_MEDIA_INLINE_INVALID')
+  return data
+}
+
 /** Validate the canonical 16 kHz mono PCM16 WAV accepted by the local provider. */
 function validateWav(data) {
   if (data.length < 46 ||
@@ -228,17 +248,28 @@ export async function transcribeMessageRecord({
 
   let response
   try {
-    response = await transport.action('get_record', { file, out_format: 'wav' }, PLATFORM_TIMEOUT_MS)
-  } catch {
-    throw mediaError('QQ_MEDIA_BACKEND_UNAVAILABLE')
+    response = await transport.action('get_record', { file, out_format: 'wav' }, PLATFORM_TIMEOUT_MS, MAX_RESPONSE_BYTES)
+  } catch (error) {
+    throw mediaError(error?.code === 'ONEBOT_RESPONSE_TOO_LARGE'
+      ? 'QQ_MEDIA_RESPONSE_TOO_LARGE'
+      : 'QQ_MEDIA_BACKEND_UNAVAILABLE')
   }
   assertMediaRead(core, sessionId, true)
-  if (!response || typeof response !== 'object' || Array.isArray(response) || typeof response.file !== 'string') {
+  if (!response || typeof response !== 'object' || Array.isArray(response)) {
     throw mediaError('QQ_MEDIA_LOCAL_FILE_UNAVAILABLE')
   }
 
-  const localFile = resolveLocalAudio(response.file, root, mediaRoot)
-  const audio = await withTimeout(readBoundedAudio(localFile), READ_TIMEOUT_MS, 'QQ_MEDIA_TIMEOUT')
+  let audio
+  if (typeof response.file === 'string') {
+    // A present file remains authoritative. An inline base64 field must never
+    // bypass a rejected local path.
+    const localFile = resolveLocalAudio(response.file, root, mediaRoot)
+    audio = await withTimeout(readBoundedAudio(localFile), READ_TIMEOUT_MS, 'QQ_MEDIA_TIMEOUT')
+  } else if (typeof response.base64 === 'string') {
+    audio = decodeInlineWav(response.base64)
+  } else {
+    throw mediaError('QQ_MEDIA_LOCAL_FILE_UNAVAILABLE')
+  }
   validateWav(audio)
 
   assertMediaRead(core, sessionId, true)
