@@ -1,5 +1,9 @@
 # amadeus-qq 交接
 
+## 当前检查点（2026-10-26，只读结果投影）
+
+已开放的只读 OneBot 能力按字段投影，稳定身份结果核对受控目标。125 项测试中 124 通过、1 项因 Windows 符号链接权限跳过；构建通过。QA.46 在隔离官方 DSH Desktop 中通过真实模型目录调用，合成凭据与 URL 未进入工具结果；硬重启后恢复 `connect:false`，模拟服务已关闭。详见 `docs/verification/READ_RESULT_PROJECTION_2026-10-26.md`。PR #1 保持 Draft，独立无头 NapCat 与真实 QQ 尚未验证。
+
 ## 当前检查点（2026-10-26，入站图片读取）
 
 最新代码增加 Enhanced Scene 的 `qq_read_message_image`、两种媒体受限 preset、受控本地 `get_image` 文件读取及固定限频传输诊断。Codex 新增失败回归，原有两个官方 DeepSeek Flash 持久 Creator 会话分别实现媒体模块和 preset/Host 接线，Codex 独立审查。`npm test` 为 121 通过、0 失败、1 跳过；`npm run build` 通过。QA.43 在隔离官方 DSH Desktop 上经真实模型工具调用、image block、硬重启持久性与撤权拒绝测试；QA.44 再次通过真实模型图片调用；最终 QA.45 通过安装和重启加载。Safe Chat 请求头不含图片工具或 Shell。详见 `docs/verification/MEDIA_READ_2026-10-26.md`。隔离 Profile 已恢复 `connect:false`，本机模拟 OneBot 已停止。独立无头 NapCat、真实 QQ 和其他媒体形态仍未验证，PR 保持 Draft，不可部署。

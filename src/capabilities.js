@@ -31,10 +31,142 @@ function parsePaging(args) {
   return { offset, limit }
 }
 
-function pageDirectory(data, paging) {
-  if (!Array.isArray(data)) throw new Error('QQ_CAPABILITY_INVALID_RESPONSE')
-  const items = data.slice(paging.offset, paging.offset + paging.limit)
+function pageDirectory(data, paging, projectItem) {
+  if (!Array.isArray(data) || typeof projectItem !== 'function') throw new Error('QQ_CAPABILITY_INVALID_RESPONSE')
+  const items = data.slice(paging.offset, paging.offset + paging.limit).map(projectItem)
   return { items, total: data.length, partial: paging.offset + items.length < data.length }
+}
+
+function invalidResponse() {
+  return new Error('QQ_CAPABILITY_INVALID_RESPONSE')
+}
+
+function projectionObject(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw invalidResponse()
+  return data
+}
+
+function projectId(value) {
+  try { return normalizeId(value, 'id') } catch { throw invalidResponse() }
+}
+
+function projectString(value, max = 100) {
+  return typeof value === 'string' ? value.slice(0, max) : undefined
+}
+
+function projectCount(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : undefined
+}
+
+function requireSameId(actual, expected) {
+  if (typeof expected !== 'string' || actual !== expected) throw new Error('QQ_CAPABILITY_SCOPE_MISMATCH')
+}
+
+function finishProjection(projected, data) {
+  if (Object.keys(projected).length === 0 && typeof data.ok === 'boolean') projected.ok = data.ok
+  return projected
+}
+
+function projectStatus(data) {
+  const source = projectionObject(data)
+  const projected = {}
+  if (typeof source.online === 'boolean') projected.online = source.online
+  if (typeof source.good === 'boolean') projected.good = source.good
+  return finishProjection(projected, source)
+}
+
+function projectVersion(data) {
+  const source = projectionObject(data)
+  const projected = {}
+  for (const key of ['app_name', 'app_version', 'protocol_version']) {
+    const value = projectString(source[key], 64)
+    if (value !== undefined) projected[key] = value
+  }
+  return finishProjection(projected, source)
+}
+
+function projectGroupInfo(data, expected) {
+  const source = projectionObject(data)
+  const projected = { group_id: projectId(source.group_id) }
+  requireSameId(projected.group_id, expected?.group_id)
+  const name = projectString(source.group_name)
+  if (name !== undefined) projected.group_name = name
+  const members = projectCount(source.member_count)
+  if (members !== undefined) projected.member_count = members
+  const maxMembers = projectCount(source.max_member_count)
+  if (maxMembers !== undefined) projected.max_member_count = maxMembers
+  return finishProjection(projected, source)
+}
+
+function projectMemberInfo(data, expected) {
+  const source = projectionObject(data)
+  const projected = {
+    group_id: projectId(source.group_id),
+    user_id: projectId(source.user_id),
+  }
+  requireSameId(projected.group_id, expected?.group_id)
+  requireSameId(projected.user_id, expected?.user_id)
+  const nickname = projectString(source.nickname)
+  if (nickname !== undefined) projected.nickname = nickname
+  const card = projectString(source.card)
+  if (card !== undefined) projected.card = card
+  const role = projectString(source.role, 32)
+  if (role !== undefined) projected.role = role
+  return finishProjection(projected, source)
+}
+
+function projectMember(data) {
+  const source = projectionObject(data)
+  const projected = { user_id: projectId(source.user_id) }
+  const nickname = projectString(source.nickname)
+  if (nickname !== undefined) projected.nickname = nickname
+  const card = projectString(source.card)
+  if (card !== undefined) projected.card = card
+  const role = projectString(source.role, 32)
+  if (role !== undefined) projected.role = role
+  return finishProjection(projected, source)
+}
+
+function projectStranger(data, expected) {
+  const source = projectionObject(data)
+  const projected = { user_id: projectId(source.user_id) }
+  requireSameId(projected.user_id, expected?.user_id)
+  const nickname = projectString(source.nickname)
+  if (nickname !== undefined) projected.nickname = nickname
+  const sex = projectString(source.sex, 16)
+  if (sex !== undefined) projected.sex = sex
+  return finishProjection(projected, source)
+}
+
+function projectLogin(data, expected) {
+  const source = projectionObject(data)
+  const projected = { user_id: projectId(source.user_id) }
+  requireSameId(projected.user_id, expected?.botId)
+  const nickname = projectString(source.nickname)
+  if (nickname !== undefined) projected.nickname = nickname
+  return finishProjection(projected, source)
+}
+
+function projectFriend(data) {
+  const source = projectionObject(data)
+  const projected = { user_id: projectId(source.user_id) }
+  const nickname = projectString(source.nickname)
+  if (nickname !== undefined) projected.nickname = nickname
+  const remark = projectString(source.remark)
+  if (remark !== undefined) projected.remark = remark
+  return finishProjection(projected, source)
+}
+
+function projectGroup(data) {
+  const source = projectionObject(data)
+  const projected = { group_id: projectId(source.group_id) }
+  const name = projectString(source.group_name)
+  if (name !== undefined) projected.group_name = name
+  const members = projectCount(source.member_count)
+  if (members !== undefined) projected.member_count = members
+  const maxMembers = projectCount(source.max_member_count)
+  if (maxMembers !== undefined) projected.max_member_count = maxMembers
+  return finishProjection(projected, source)
 }
 
 /**
@@ -87,15 +219,20 @@ function risk(action) {
 
 const EXECUTABLE = new Map([
   ['qq.get_status', { action: 'get_status', category: 'profile', description: 'Read account connection status.', parameters: EMPTY,
+    project: projectStatus,
     execute: (_args, _scene) => ({}) }],
   ['qq.get_version_info', { action: 'get_version_info', category: 'profile', description: 'Read OneBot implementation and protocol version.', parameters: EMPTY,
+    project: projectVersion,
     execute: (_args, _scene) => ({}) }],
   ['qq.get_group_info', { action: 'get_group_info', category: 'group', description: 'Read information for this Session’s group only.', parameters: EMPTY,
+    project: projectGroupInfo,
     execute: (_args, scene) => { if (scene.kind !== 'group') throw new Error('QQ_GROUP_ONLY'); return { group_id: scene.peerId } } }],
   ['qq.get_group_member_info', { action: 'get_group_member_info', category: 'group', description: 'Read one stable member ID in this Session’s group.',
     parameters: { type: 'object', additionalProperties: false, properties: { userId: { type: 'string' } }, required: ['userId'] },
+    project: projectMemberInfo,
     execute: (args, scene) => { if (scene.kind !== 'group') throw new Error('QQ_GROUP_ONLY'); return { group_id: scene.peerId, user_id: normalizeId(args.userId, 'userId') } } }],
   ['qq.get_group_member_list', { action: 'get_group_member_list', category: 'group', description: 'Read a bounded list of members from this Session’s group.', parameters: EMPTY,
+    projectItem: projectMember,
     execute: (_args, scene) => { if (scene.kind !== 'group') throw new Error('QQ_GROUP_ONLY'); return { group_id: scene.peerId } } }],
   ['qq.get_msg', { action: 'get_msg', category: category('get_msg'), risk: risk('get_msg'),
     description: 'Read one message that already exists in this Session’s durable QQ inbox.',
@@ -109,6 +246,7 @@ const EXECUTABLE = new Map([
   ['qq.get_stranger_info', { action: 'get_stranger_info', category: category('get_stranger_info'), risk: risk('get_stranger_info'),
     description: 'Read a stable QQ user ID already observed in this Session’s bound Scene.',
     parameters: { type: 'object', additionalProperties: false, properties: { userId: { type: 'string' } }, required: ['userId'] },
+    project: projectStranger,
     execute: (args, scene, { store }) => {
       const userId = normalizeId(args.userId, 'userId')
       const observed = scene.kind === 'private'
@@ -120,18 +258,21 @@ const EXECUTABLE = new Map([
   ['qq.get_login_info', { action: 'get_login_info', category: category('get_login_info'), risk: risk('get_login_info'),
     description: 'Read the logged-in QQ account summary. This capability accepts no target or scene arguments.',
     parameters: EMPTY,
+    project: projectLogin,
     execute: () => ({}) }],
   ['qq.get_friend_list', { action: 'get_friend_list', category: category('get_friend_list'), risk: 'medium',
     scenePermission: 'owner-private-explicit',
     requiredCapability: 'qq.friends.read',
     description: 'Read a bounded page of the account friend directory; requires an explicit owner private grant.',
     parameters: PAGING,
+    projectItem: projectFriend,
     execute: () => ({}) }],
   ['qq.get_group_list', { action: 'get_group_list', category: category('get_group_list'), risk: 'medium',
     scenePermission: 'owner-private-explicit',
     requiredCapability: 'qq.groups.read',
     description: 'Read a bounded page of the account group directory; requires an explicit owner private grant.',
     parameters: PAGING,
+    projectItem: projectGroup,
     execute: () => ({}) }],
 ])
 
@@ -220,12 +361,17 @@ export class CapabilityRegistry {
       throw new Error(`QQ_PERMISSION_CHANGED: ${requiredCapability} was revoked during the read`)
     }
     let result
-    if (paging) result = pageDirectory(data, paging)
-    else if (id === 'qq.get_msg') result = projectPlatformMessage(data)
-    else if (id === 'qq.get_group_member_list' && Array.isArray(data)) {
-      result = { items: data.slice(0, 200), total: data.length, partial: data.length > 200 }
+    if (paging) {
+      if (typeof definition.projectItem !== 'function') throw new Error('QQ_CAPABILITY_PROJECTION_MISSING')
+      result = pageDirectory(data, paging, definition.projectItem)
+    } else if (id === 'qq.get_msg') result = projectPlatformMessage(data)
+    else if (id === 'qq.get_group_member_list') {
+      if (!Array.isArray(data) || typeof definition.projectItem !== 'function') throw invalidResponse()
+      const items = data.slice(0, 200).map(definition.projectItem)
+      result = { items, total: data.length, partial: data.length > 200 }
     } else {
-      result = { data }
+      if (typeof definition.project !== 'function') throw new Error('QQ_CAPABILITY_PROJECTION_MISSING')
+      result = { data: definition.project(data, { ...params, botId: scene.botId }) }
     }
     if (JSON.stringify(result).length > MAX_RESULT_CHARS) throw new Error('QQ_CAPABILITY_RESULT_TOO_LARGE')
     return result

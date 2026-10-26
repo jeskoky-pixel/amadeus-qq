@@ -22,6 +22,10 @@ function fixture(t, { permissionPolicy = {} } = {}) {
     if (name === 'get_group_member_list') return Array.from({ length: 250 }, (_, i) => ({ user_id: i + 1 }))
     if (name === 'get_friend_list') return Array.from({ length: 225 }, (_, i) => ({ user_id: i + 1, nickname: `friend-${i + 1}` }))
     if (name === 'get_group_list') return Array.from({ length: 225 }, (_, i) => ({ group_id: i + 1, group_name: `group-${i + 1}` }))
+    if (name === 'get_group_info') return { group_id: args.group_id, group_name: 'Synthetic group' }
+    if (name === 'get_group_member_info') return { group_id: args.group_id, user_id: args.user_id, nickname: 'Synthetic member' }
+    if (name === 'get_stranger_info') return { user_id: args.user_id, nickname: 'Synthetic person' }
+    if (name === 'get_login_info') return { user_id: 10001, nickname: 'Synthetic bot' }
     return { ok: true }
   }, stop() {} }
   const core = new QQCore({ store, dsh: {}, transport,
@@ -42,7 +46,8 @@ test('installed NapCat inventory is complete as identifiers but unverified by th
 
 test('capability execution binds group target to the DSH Session and rejects arbitrary action/scene arguments', async t => {
   const { registry, core, calls } = fixture(t)
-  assert.deepEqual(await registry.execute('group-session', 'qq.get_group_info'), { data: { ok: true } })
+  assert.deepEqual(await registry.execute('group-session', 'qq.get_group_info'),
+    { data: { group_id: '20001', group_name: 'Synthetic group' } })
   assert.deepEqual(calls[0], { name: 'get_group_info', args: { group_id: '20001' } })
   await assert.rejects(registry.execute('group-session', 'qq.get_group_info', { group_id: '99999' }), /unexpected capability argument/)
   await assert.rejects(registry.execute('private-session', 'qq.get_group_info'), /GROUP_ONLY/)
@@ -87,7 +92,8 @@ test('message and profile reads are limited to IDs observed in the bound Scene',
   assert.deepEqual(await registry.execute('group-session', 'qq.get_msg', { messageId: '701' }), { data: { ok: true } })
   assert.deepEqual(calls.at(-1), { name: 'get_msg', args: { message_id: '701' } })
   await assert.rejects(registry.execute('group-session', 'qq.get_msg', { messageId: '799' }), /QQ_MESSAGE_SCOPE/)
-  assert.deepEqual(await registry.execute('group-session', 'qq.get_stranger_info', { userId: '40001' }), { data: { ok: true } })
+  assert.deepEqual(await registry.execute('group-session', 'qq.get_stranger_info', { userId: '40001' }),
+    { data: { user_id: '40001', nickname: 'Synthetic person' } })
   assert.deepEqual(calls.at(-1), { name: 'get_stranger_info', args: { user_id: '40001' } })
   await assert.rejects(registry.execute('group-session', 'qq.get_stranger_info', { userId: '99999' }), /QQ_PERSON_SCOPE/)
   await registry.execute('private-session', 'qq.get_stranger_info', { userId: '30001' })
@@ -167,6 +173,63 @@ test('account directories are Owner-only, explicitly granted, paged and never ta
   core.store.setScenePermissions(owner, { mode: 'owner-agent', overrides: { 'qq.friends.read': 'deny', 'qq.groups.read': 'deny' } })
   await assert.rejects(registry.execute('private-session', 'qq.get_friend_list'), /PERMISSION|CHANGED/)
   assert.equal(calls.length, before)
+  core.close()
+})
+
+test('read-only platform results drop undeclared paths, tokens and extra fields before model output', async t => {
+  const { registry, core, transport } = fixture(t, { permissionPolicy: { ownerPrivateIds: ['30001'] } })
+  const owner = { botId: '10001', kind: 'private', peerId: '30001' }
+  core.store.setScenePermissions(owner, { mode: 'owner-agent', overrides: {
+    'qq.friends.read': 'allow', 'qq.groups.read': 'allow',
+  } })
+  core.store.bindSession(owner, 'private-session')
+  transport.action = async name => {
+    if (name === 'get_friend_list') return [{ user_id: 40001, nickname: 'Friend', remark: 'Known',
+      avatar_url: 'https://secret.invalid/friend-token', local_path: 'C:\\secret\\friend' }]
+    if (name === 'get_group_list') return [{ group_id: 50001, group_name: 'Group', member_count: 12,
+      hiddenCredential: 'group-secret-token' }]
+    if (name === 'get_group_member_list') return [{ user_id: 60001, nickname: 'Member', card: 'Card',
+      raw_profile: { token: 'member-secret-token' } }]
+    return { user_id: 10001, nickname: 'Bot', credentials: 'login-secret-token' }
+  }
+  const results = [
+    await registry.execute('private-session', 'qq.get_friend_list'),
+    await registry.execute('private-session', 'qq.get_group_list'),
+    await registry.execute('group-session', 'qq.get_group_member_list'),
+    await registry.execute('private-session', 'qq.get_login_info'),
+  ]
+  const serialized = JSON.stringify(results)
+  for (const secret of ['friend-token', 'C:\\secret', 'group-secret-token', 'member-secret-token', 'login-secret-token']) {
+    assert.equal(serialized.includes(secret), false, secret)
+  }
+  assert.match(serialized, /Friend|Group|Member|Bot/)
+  core.close()
+})
+
+test('directory and identity reads reject platform rows with no stable ID', async t => {
+  const { registry, core, transport } = fixture(t, { permissionPolicy: { ownerPrivateIds: ['30001'] } })
+  const owner = { botId: '10001', kind: 'private', peerId: '30001' }
+  core.store.setScenePermissions(owner, { mode: 'owner-agent', overrides: { 'qq.friends.read': 'allow' } })
+  core.store.bindSession(owner, 'private-session')
+  transport.action = async () => [{ ok: true, nickname: 'Missing identity' }]
+  await assert.rejects(registry.execute('private-session', 'qq.get_friend_list'), /QQ_CAPABILITY_INVALID_RESPONSE/)
+  transport.action = async () => ({ ok: true, nickname: 'Missing login ID' })
+  await assert.rejects(registry.execute('private-session', 'qq.get_login_info'), /QQ_CAPABILITY_INVALID_RESPONSE/)
+  core.close()
+})
+
+test('identity reads reject platform IDs that disagree with the bound Scene or requested person', async t => {
+  const { registry, core, transport } = fixture(t)
+  const group = { botId: '10001', kind: 'group', peerId: '20001' }
+  core.store.appendMessage(group, { messageId: '805', senderId: '40001', segments: [] })
+  transport.action = async () => ({ group_id: 99999, group_name: 'Wrong group' })
+  await assert.rejects(registry.execute('group-session', 'qq.get_group_info'), /QQ_CAPABILITY_(SCOPE|INVALID)/)
+  transport.action = async () => ({ group_id: 20001, user_id: 50001, nickname: 'Wrong member' })
+  await assert.rejects(registry.execute('group-session', 'qq.get_group_member_info', { userId: '40001' }), /QQ_CAPABILITY_(SCOPE|INVALID)/)
+  transport.action = async () => ({ user_id: 50001, nickname: 'Wrong person' })
+  await assert.rejects(registry.execute('group-session', 'qq.get_stranger_info', { userId: '40001' }), /QQ_CAPABILITY_(SCOPE|INVALID)/)
+  transport.action = async () => ({ user_id: 99999, nickname: 'Wrong account' })
+  await assert.rejects(registry.execute('group-session', 'qq.get_login_info'), /QQ_CAPABILITY_(SCOPE|INVALID)/)
   core.close()
 })
 
