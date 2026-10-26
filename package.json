@@ -7,20 +7,32 @@
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
-    "./preset-guard": "./src/preset-guard.mjs"
+    "./preset-guard": "./src/preset-guard.mjs",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
   },
   "files": [
     "src/*.js",
     "src/*.mjs",
+    "src/client",
+    "lib",
+    "scripts",
     "cordis.patch.yml",
     "preset.patch.yml",
     "README.md"
   ],
   "dsh": {
+    "manifestVersion": 1,
     "bundle": {
       "patch": [
         "./cordis.patch.yml",
         "./preset.patch.yml"
+      ]
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
       ]
     }
   },
@@ -29,6 +41,7 @@
     "ws": "^8.18.3"
   },
   "scripts": {
+    "build": "node scripts/build-client.mjs",
     "test": "node --test tests/*.test.mjs"
   },
   "engines": {

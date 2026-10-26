@@ -12,7 +12,21 @@ const MODE_TO_CAPABILITIES = Object.freeze({
   'autonomous-social': ['qq.read', 'qq.send', 'dsh.search', 'qq.media.read', 'qq.qzone.publish'],
   'owner-agent': ['qq.read', 'qq.send', 'dsh.search', 'qq.media.read', 'qq.qzone.publish', 'dsh.shell'],
 })
-const KNOWN_CAPABILITIES = new Set(Object.values(MODE_TO_CAPABILITIES).flat())
+
+/**
+ * Capability catalog shared by the decision engine and the management API.
+ * `implemented` means this plugin has a real execution path today; false marks
+ * decision-only capabilities that must never be presented as usable.
+ */
+export const CAPABILITY_CATALOG = Object.freeze([
+  Object.freeze({ id: 'qq.read', implemented: true }),
+  Object.freeze({ id: 'qq.send', implemented: true }),
+  Object.freeze({ id: 'dsh.search', implemented: false }),
+  Object.freeze({ id: 'qq.media.read', implemented: false }),
+  Object.freeze({ id: 'qq.qzone.publish', implemented: false }),
+  Object.freeze({ id: 'dsh.shell', implemented: false }),
+])
+const KNOWN_CAPABILITIES = new Set(CAPABILITY_CATALOG.map(item => item.id))
 const OVERRIDE_VALUES = new Set(['inherit', 'allow', 'deny'])
 const ID_PATTERN = /^[1-9]\d{0,19}$/
 

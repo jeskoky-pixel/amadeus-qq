@@ -2,7 +2,7 @@
 
 通过独立无头 NapCat 接入 QQ，维护持续收发、工具操作、等待续接、媒体、路由、去重和回执。
 
-**当前状态：M1 隔离开发候选。**已有独立 DSH 插件包、持续 Session 核心和模拟 OneBot 回放。包内随附独立的受限 Agent preset（仅 QQ 工具边界，不含人格）。隔离 DSH 重启后 preset registry 不再 broken，真实 Session request/header 为 8 个 QQ 工具、0 个非 QQ 工具；停用 QQ 包后旧 Session 未获得非 QQ 工具，重启后因 preset 缺失而拒绝恢复。强制非 QQ 工具调用和跨场景 Memory 隐私仍未完成真实验收；尚未完成独立无头 NapCat、真实 QQ、媒体、QQ 空间、生态联动和原生管理 GUI 验收，不可部署到日常 QQ。
+**当前状态：v1.0 隔离开发候选，PR #1 仍为 Draft。**已有独立 DSH 插件包、持续 Session 核心、模拟 OneBot 回放、受限 Agent preset、逐 Scene 权限管理接口和原生 Settings GUI。隔离 DSH Desktop 已验证 GUI 场景选择、权限保存、并发冲突及重启持久性；测试记录见 [GUI 隔离验收](docs/verification/GUI_STAGE_2026-10-26.md)。目前仅 `qq.read`、`qq.send` 有对应运行路径；GUI 中其余能力明确标为策略占位。独立无头 NapCat、真实 QQ、完整媒体与空间、生态联动和跨场景 Memory 隐私尚未完成真实验收，不可部署到日常 QQ。
 
 项目入口：[Amadeus-dsh](https://github.com/jeskoky-pixel/Amadeus-dsh)。开发顺序：P0。当前仓库已于 2026-10-25 根据用户要求公开，便于网页端审阅。
 
@@ -19,6 +19,7 @@ QQ 交互以现用 bridge 的黑盒体验为基准，允许修改或重写。仅
 ## 开发入口
 
 - [HANDOFF.md](HANDOFF.md)：当前状态、下一步与未运行检查。
+- [GUI 隔离验收](docs/verification/GUI_STAGE_2026-10-26.md)
 - [M0 基线与检查](docs/m0/BASELINE.md)
 - [QQ ↔ Life 契约草案](docs/contracts/qq-life-v0.1.md)
 - [总体规格](https://github.com/jeskoky-pixel/Amadeus-dsh/blob/main/docs/AMADEUS_SPEC.md)

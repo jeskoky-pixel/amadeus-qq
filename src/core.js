@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { normalizeId, normalizeMessageId, sceneIdentity, sceneKey } from './storage.js'
 import { normalizeOneBotMessage, validateOutgoingSegments } from './onebot.js'
-import { PermissionEngine, validateScenePermissions } from './permissions.js'
+import { CAPABILITY_CATALOG, PermissionEngine, validateScenePermissions } from './permissions.js'
 
 const DEFAULT_WAIT_MS = 30_000
 const MAX_WAIT_MS = 300_000
@@ -153,6 +153,17 @@ export class QQCore {
             : { mode: permissions.mode, overrides: { ...permissions.overrides }, revision: permissions.revision },
           revision: permissions?.revision ?? 0,
           effectiveMode: this.permissions.evaluate(row, access, 'qq.read').mode,
+          ownerEligible: row.kind === 'private' && this.permissions.ownerPrivateIds.has(row.peerId),
+          capabilities: CAPABILITY_CATALOG.map(capability => {
+            const decision = this.permissions.evaluate(row, access, capability.id)
+            return {
+              id: capability.id,
+              implemented: capability.implemented,
+              override: access?.overrides?.[capability.id] ?? 'inherit',
+              effective: decision.allowed,
+              reason: decision.reason,
+            }
+          }),
           health: {
             sessionActive: Boolean(row.sessionId),
             transport: this.transport.status ?? 'unknown',

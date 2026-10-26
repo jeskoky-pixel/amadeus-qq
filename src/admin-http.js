@@ -8,7 +8,7 @@
  */
 
 import { sceneIdentity } from './storage.js'
-import { validateScenePermissions } from './permissions.js'
+import { MODE_IDS, validateScenePermissions } from './permissions.js'
 
 export const ADMIN_PREFIX = '/api/amadeus-qq'
 const MAX_BODY_BYTES = 64 * 1024
@@ -195,7 +195,7 @@ export function createAdminHandler(core, connection) {
       try {
         return send(res, 200, {
           ok: true,
-          data: { scenes: core.listScenePermissions(), health: core.health() },
+          data: { scenes: core.listScenePermissions(), health: core.health(), modes: [...MODE_IDS] },
         })
       } catch {
         return send(res, 500, { ok: false, error: 'QQ management request failed' })
