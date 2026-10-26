@@ -4,6 +4,8 @@
 
 Owner Agent 与自主社交模式仍是部分实现。管理 API 对 `implemented:false` 的 Shell、QQ 空间能力现在始终显示 `effective:false`，运行授权也拒绝；原生 Settings 的模式名称与说明明确提示缺少的通用工具和 QQ 空间路径。模式策略仍可保存，具体可执行性以下方能力状态为准。
 
+隔离 DSH Host 的真实 Settings 页面已用携带本机隔离会话 Cookie 的 headless Edge 只读检查：Amadeus QQ 设置可加载，两种模式的选项均显示“部分功能待实现”，Owner Agent 说明明确列出 Shell、文件、浏览器、GitHub 等缺口。测试只选择未保存的草稿，未修改 Scene 权限。
+
 Codex 先写失败回归，原持久媒体与核心 DSH Creator 会话分别实现，Codex 独立审查并修正旧 Session 恢复问题。`npm test` 共 134 项：132 通过、0 失败、2 项因本机 Windows 无权限创建符号链接跳过；`npm run build` 与 `git diff --check` 通过。
 
 QA.48 包通过官方 Plugin Manager 安装到隔离 DSH Desktop。隔离 Profile 临时启用官方语音 Bundle，SenseVoice 模型仅准备在 QA 专用目录；三个文件合计 241,357,257 字节，默认 DSH 语音数据目录未创建。本机模拟 OneBot 返回合成 `get_record` 文件，音频由本机离线 TTS 生成。真实 `deepseek-official/deepseek-flash` 模型请求头包含新工具，调用后官方 `sensevoice-local` 返回了转写文本（“Hello Aadadeus. This is a local synthetic voice test.”）；这是成功的本地 ASR 路径，识别文本与合成原句略有差异。将群 Scene 改为 Safe Chat 后，旧 Session 的工具请求头不再包含语音工具，强行调用返回 `QQ_PERMISSION_DENIED`，没有转写结果。
