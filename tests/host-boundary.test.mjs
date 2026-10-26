@@ -138,6 +138,46 @@ test('host guard denies every non-QQ tool for persisted QQ Session and tool args
   assert.equal(fs.existsSync(`${statePath}.lock`), false)
 })
 
+test('connector execution guard admits registered Life tools only for a live Owner private Session', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amadeus-qq-owner-host-tool-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const statePath = path.join(dir, 'qq.json')
+  const store = new QQStore(statePath)
+  const owner = { botId: '10001', kind: 'private', peerId: '30001' }
+  const ordinary = { botId: '10001', kind: 'private', peerId: '30002' }
+  const group = { botId: '10001', kind: 'group', peerId: '20001' }
+  store.setScenePermissions(owner, { mode: 'owner-agent' })
+  store.bindSession(owner, 'owner-session')
+  store.bindSession(ordinary, 'friend-session')
+  store.bindSession(group, 'group-session')
+  const host = fakeHost()
+  host.ctx.tools.schemas = () => [{ name: 'life_intent_create' }, { name: 'pwsh' }, { name: 'run_code' }]
+  apply(host.ctx, {
+    enabled: true, connect: false, statePath, sessionCwd: dir, agentPreset: 'amadeus-qq',
+    policy: { botIds: ['10001'], privateIds: ['30001', '30002'], groupIds: ['20001'] },
+    permissions: { ownerPrivateIds: ['30001'] },
+  })
+  const guard = host.guards[0]
+  const call = (id, name) => guard({ name, agent: { session: { id } } })
+  assert.equal(call('owner-session', 'life_intent_create'), undefined)
+  assert.equal(call('owner-session', 'pwsh'), undefined)
+  assert.match(call('owner-session', 'run_code'), /non-QQ tools/)
+  assert.match(call('owner-session', 'not_registered'), /non-QQ tools/)
+  assert.match(call('friend-session', 'life_intent_create'), /non-QQ tools/)
+  assert.match(call('group-session', 'life_intent_create'), /non-QQ tools/)
+  for (const effect of host.effects.reverse()) effect()
+  store.setScenePermissions(owner, { mode: 'safe-chat' })
+  const restarted = fakeHost()
+  restarted.ctx.tools.schemas = host.ctx.tools.schemas
+  apply(restarted.ctx, {
+    enabled: true, connect: false, statePath, sessionCwd: dir, agentPreset: 'amadeus-qq',
+    policy: { botIds: ['10001'], privateIds: ['30001', '30002'], groupIds: ['20001'] },
+    permissions: { ownerPrivateIds: ['30001'] },
+  })
+  assert.match(restarted.guards[0]({ name: 'life_intent_create', agent: { session: { id: 'owner-session' } } }), /non-QQ tools/)
+  for (const effect of restarted.effects.reverse()) effect()
+})
+
 test('native PTT transcription is always registered with a messageId-only schema', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amadeus-qq-native-tool-'))
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }))

@@ -50,6 +50,20 @@ function fixture(t) {
   return { dir, mediaRoot, filePath, videoPath, store, scene, core, transport, calls, saved, readFile, readVideo }
 }
 
+test('get_file uses a bounded response and maps response overflow without attachment output', async t => {
+  const { readFile, transport, saved } = fixture(t)
+  let captured
+  transport.action = async (...args) => {
+    captured = args
+    const error = new Error('too large')
+    error.code = 'ONEBOT_RESPONSE_TOO_LARGE'
+    throw error
+  }
+  await assert.rejects(readFile(), /QQ_MEDIA_RESPONSE_TOO_LARGE/)
+  assert.deepEqual(captured, ['get_file', { file: 'opaque-file-701' }, 10_000, 32 * 1024 * 1024])
+  assert.equal(saved.length, 0)
+})
+
 test('file and video reads use only the stored Scene handle and a bounded get_file', async t => {
   const { readFile, readVideo, calls, saved, filePath, videoPath } = fixture(t)
   assert.deepEqual(await readFile(), { attachment: { attachmentId: 'sha256:qa-file', name: 'qq-file', bytes: FILE_BYTES.length } })

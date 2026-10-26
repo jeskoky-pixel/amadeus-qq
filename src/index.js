@@ -264,7 +264,17 @@ export function apply(ctx, config = {}) {
         ? undefined
         : 'QQ Session search permission is not authorized'
     }
-    if (OWNER_NATIVE_TOOLS.includes(exec.name)) {
+    // The Owner preset may expose tools registered later by other plugins
+    // (for example Life). The connector guard must use the same live Owner
+    // grant while refusing unknown names and the PTC code transport.
+    let registeredOwnerTool = false
+    if (typeof exec.name === 'string' && exec.name !== 'run_code' &&
+      !exec.name.startsWith('qq_') && typeof ctx.tools.schemas === 'function') {
+      try {
+        registeredOwnerTool = (ctx.tools.schemas() ?? []).some(schema => schema?.name === exec.name)
+      } catch { /* fail closed for dynamic tools */ }
+    }
+    if (OWNER_NATIVE_TOOLS.includes(exec.name) || registeredOwnerTool) {
       return core.authorizeSessionCapability(sid, 'qq.owner.tools')
         ? undefined
         : 'QQ Session cannot use non-QQ tools'

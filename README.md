@@ -6,7 +6,7 @@
 
 通过独立无头 NapCat 接入 QQ，维护持续收发、工具操作、等待续接、媒体、路由、去重和回执。
 
-**当前状态：v1.0 开发候选，PR #1 仍为 Draft。**已有独立插件包、连续 Session、逐 Scene 权限、原生 Settings 和最小 Web Console。真实 NapCat/QQ 已完成限定测试私聊和测试账号的核心联调。Memory 联合 Host 隐私验收、Life Wake→QQ 闭环、State 联动、Web Console 人工 GUI 操作和长时间稳定性仍未完成；不应直接部署到日常 QQ。
+**当前状态：v1.0 开发候选，PR #1 仍为 Draft。**已有独立插件包、连续 Session、逐 Scene 权限、原生 Settings 和最小 Web Console。真实 NapCat/QQ 已完成限定测试私聊和测试账号的核心联调；Memory 在同一隔离 DSH Host 的 Scene 隔离、Life 到 QQ 只读工具的最小 wake 闭环也已通过。State 仅安全降级，Web Console 人工 GUI 操作、自主 QQ 外发和长时间稳定性仍未验收；不应直接部署到日常 QQ。
 
 项目入口：[Amadeus-dsh](https://github.com/jeskoky-pixel/Amadeus-dsh)。开发顺序：P0。当前仓库已于 2026-10-25 根据用户要求公开，便于网页端审阅。
 
@@ -31,7 +31,7 @@ QQ 交互以现用 bridge 的黑盒体验为基准，允许修改或重写。仅
 
 需求与验收关注：R-01、R-02、R-03、R-04、R-05、R-13、R-15；重点验收 A-02—A-06、A-12、A-15。
 
-下一步：完成收缩版清单中尚缺的 Memory/Life 联合 Host 与 Web Console 操作验收，再评估日常 QQ 部署；优先保留现有安全边界与回滚能力。
+下一步：按[收缩版清单](docs/V1_SCOPE.md)核对未实测的 QQ 操作和 Web Console 页面；生产部署前先做小范围灰度与回滚演练。Life 自主 QQ 外发需由 Life 明确授权，不能绕过现有 wake 禁发规则。
 
 ## 发布与隐私
 

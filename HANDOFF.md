@@ -1,5 +1,9 @@
 # amadeus-qq 交接
 
+## 最新检查点（2026-10-27，v1.0 定向收尾）
+
+在原 `codex/m0-baseline` 和 Draft PR #1 上修复 Owner 动态 Host 工具被 QQ Connector 全局 guard 错误拒绝的问题，并补入站 `get_image`/`get_file` 有界响应回归。`npm test` 为 256 通过、0 失败、4 跳过，构建及 `git diff --check` 通过。隔离官方 DSH Desktop 实际调用 `life_intent_create`、`web_fetch`；Life wake 后调用 QQ 当前 Scene 只读工具并留下 `executed` 记录，管理 API 撤权后旧 Owner Session 再调用 `web_fetch` 被拒。QQ+Memory 在同一 Host 中的合成群 A、群 B、私聊上下文互相隔离。QQ/Life Bundle 已停用，隔离 QA Profile 和 QQ 合成状态已恢复，测试 NapCat 保持停止。真实 QQ 的核心收发、头像/签名、QQ 空间证据仍见[最终验收记录](docs/verification/V1_REAL_NAPCAT_2026-10-27.md)；新媒体内联分支仅有模拟证据。未完成的实机边界见[范围清单](docs/V1_SCOPE.md)。PR 继续 Draft，不自动合并或部署。
+
 ## 最新检查点（2026-10-27，真实 NapCat/QQ 与 v1.0 收尾）
 
 当前候选已通过 253 项测试、0 失败、4 跳过，构建与差异检查通过。隔离 DSH 模型实际调用 Owner 的 `pwsh`/`read`、QQ 原生 ASR、私聊发送、账号资料与 QQ 空间工具；真实 NapCat 私聊文字/图片/语音收发、`fetch_ptt_text`、头像/签名修改及恢复、仅自己可见说说发布和删除也已验证。重启后相同私聊与空间 `actionId` 去重有效。最终安装包在隔离 Desktop 硬重启加载，最小同源 Web Console 的真实 Host HTTP 路由、匿名拒绝与 CSP 已通过；尚未人工操作页面。当前隔离 QQ 插件停用、`connect:false`，测试 NapCat 已停止，原生产 SnowLuma 配置未改。完整证据与未验收边界见[最终验收记录](docs/verification/V1_REAL_NAPCAT_2026-10-27.md)，最新剩余清单见[收缩版 v1.0 范围](docs/V1_SCOPE.md)。PR #1 保持 Draft，不自动合并部署。以下为历史检查点。

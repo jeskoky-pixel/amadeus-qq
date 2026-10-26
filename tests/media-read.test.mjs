@@ -55,6 +55,29 @@ test('image read uses only a stored Scene image handle and renders a Host attach
   assert.equal(JSON.stringify(result).includes(imagePath), false)
 })
 
+test('get_image is response-bounded and accepts canonical inline image bytes', async t => {
+  const { read, transport, saved } = fixture(t)
+  let captured
+  transport.action = async (...args) => {
+    captured = args
+    return { base64: PNG.toString('base64'), url: 'https://must-not-fetch.invalid/image' }
+  }
+  const result = await read()
+  assert.deepEqual(captured, ['get_image', { file: 'opaque-image-701' }, 10_000, 32 * 1024 * 1024])
+  assert.equal(saved.length, 1)
+  assert.deepEqual(Buffer.from(saved[0].data), PNG)
+  assert.equal(result.attachment.attachmentId, 'sha256:qa-image')
+
+  transport.action = async () => { const error = new Error('too large'); error.code = 'ONEBOT_RESPONSE_TOO_LARGE'; throw error }
+  await assert.rejects(read(), /QQ_MEDIA_RESPONSE_TOO_LARGE/)
+
+  for (const base64 of ['base64://AAAA', PNG.toString('base64') + '$', '', undefined]) {
+    transport.action = async () => ({ base64 })
+    await assert.rejects(read(), /QQ_MEDIA_(INLINE|LOCAL_FILE)_/)
+  }
+  assert.equal(saved.length, 1)
+})
+
 test('unbound message, wrong Scene and safe-chat never request the platform image', async t => {
   const { read, calls, group, store } = fixture(t)
   await assert.rejects(read('other-session'), /QQ_(MESSAGE_SCOPE|MEDIA|PERMISSION)/)

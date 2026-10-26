@@ -4,6 +4,8 @@ import { normalizeMessageId } from './storage.js'
 import { sanitizeInboundSegments } from './onebot.js'
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+const MAX_RESPONSE_BYTES = 32 * 1024 * 1024
+const MAX_BASE64_CHARS = Math.ceil(MAX_IMAGE_BYTES / 3) * 4
 const READ_TIMEOUT_MS = 5_000
 const PLATFORM_TIMEOUT_MS = 10_000
 
@@ -135,6 +137,20 @@ async function readBoundedImage(file) {
   }
 }
 
+function decodeInlineImage(value) {
+  if (typeof value !== 'string' || value.length === 0) throw mediaError('QQ_MEDIA_INLINE_INVALID')
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value) || /^data:/i.test(value)) {
+    throw mediaError('QQ_MEDIA_INLINE_INVALID')
+  }
+  if (value.length > MAX_BASE64_CHARS) throw mediaError('QQ_MEDIA_INLINE_TOO_LARGE')
+  let data
+  try { data = Buffer.from(value, 'base64') } catch { throw mediaError('QQ_MEDIA_INLINE_INVALID') }
+  if (data.length === 0) throw mediaError('QQ_MEDIA_INLINE_INVALID')
+  if (data.length > MAX_IMAGE_BYTES) throw mediaError('QQ_MEDIA_INLINE_TOO_LARGE')
+  if (data.toString('base64') !== value) throw mediaError('QQ_MEDIA_INLINE_INVALID')
+  return data
+}
+
 /**
  * Read one inbound QQ image through the bound Scene and hand bounded bytes to
  * the official attachment service. The model supplies only messageId and an
@@ -187,20 +203,29 @@ export async function readMessageImage({
 
   let response
   try {
-    response = await transport.action('get_image', { file }, PLATFORM_TIMEOUT_MS)
-  } catch {
-    throw mediaError('QQ_MEDIA_BACKEND_UNAVAILABLE')
+    response = await transport.action('get_image', { file }, PLATFORM_TIMEOUT_MS, MAX_RESPONSE_BYTES)
+  } catch (error) {
+    throw mediaError(error?.code === 'ONEBOT_RESPONSE_TOO_LARGE'
+      ? 'QQ_MEDIA_RESPONSE_TOO_LARGE'
+      : 'QQ_MEDIA_BACKEND_UNAVAILABLE')
   }
 
   // The platform call is the last unbounded external step: a Scene revocation
   // while it was in flight must stop path access and attachment admission.
   assertMediaRead(core, sessionId, true)
-  if (!response || typeof response !== 'object' || Array.isArray(response) || typeof response.file !== 'string') {
+  if (!response || typeof response !== 'object' || Array.isArray(response)) {
     throw mediaError('QQ_MEDIA_LOCAL_FILE_UNAVAILABLE')
   }
 
-  const localFile = resolveLocalImage(response.file, root, mediaRoot)
-  const data = await withTimeout(readBoundedImage(localFile), READ_TIMEOUT_MS, 'QQ_MEDIA_TIMEOUT')
+  let data
+  if (typeof response.file === 'string') {
+    const localFile = resolveLocalImage(response.file, root, mediaRoot)
+    data = await withTimeout(readBoundedImage(localFile), READ_TIMEOUT_MS, 'QQ_MEDIA_TIMEOUT')
+  } else if (typeof response.base64 === 'string') {
+    data = decodeInlineImage(response.base64)
+  } else {
+    throw mediaError('QQ_MEDIA_LOCAL_FILE_UNAVAILABLE')
+  }
   const mediaType = sniffImageMediaType(data)
   if (mediaType === null) throw mediaError('QQ_MEDIA_UNSUPPORTED_IMAGE')
 
