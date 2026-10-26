@@ -170,6 +170,38 @@ test('missing attachment injection leaves ordinary QQ text tools available', t =
   }))
   assert.ok(host.tools.has('qq_send_message'))
   assert.equal(host.tools.has('qq_read_message_image'), false)
+  assert.equal(host.tools.has('qq_read_message_file'), false)
+  assert.equal(host.tools.has('qq_read_message_video'), false)
+  for (const effect of host.effects.reverse()) effect()
+})
+
+test('file and video tools require saveFile and take only message identity', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amadeus-qq-file-tool-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const host = fakeHost()
+  host.ctx.inject = (_services, fn) => fn(host.ctx)
+  host.ctx.attachments = {
+    async saveFile(input) {
+      return { attachmentId: 'sha256:file-tool', name: input.name, bytes: input.data.length }
+    },
+  }
+  apply(host.ctx, {
+    enabled: true, connect: false, statePath: path.join(dir, 'qq.json'),
+    sessionCwd: dir, agentPreset: 'amadeus-qq', mediaRoot: dir,
+    policy: { botIds: ['10001'], privateIds: ['30001'], groupIds: [] },
+  })
+  const fileTool = host.tools.get('qq_read_message_file')
+  const videoTool = host.tools.get('qq_read_message_video')
+  assert.ok(fileTool)
+  assert.ok(videoTool)
+  assert.equal(host.tools.has('qq_read_message_image'), false)
+  for (const tool of [fileTool, videoTool]) {
+    assert.deepEqual(Object.keys(tool.parameters.properties).sort(), ['index', 'messageId'])
+    const rendered = tool.output.render({}, { attachment: { attachmentId: 'sha256:test', name: 'qq-file', bytes: 1 } })
+    assert.deepEqual(rendered.map(item => item.type), ['text', 'file'])
+    await assert.rejects(tool.execute({ messageId: '701', path: 'C:\\private\\secret' },
+      { agent: { session: { id: 'unbound' } } }), /unknown QQ tool argument/)
+  }
   for (const effect of host.effects.reverse()) effect()
 })
 

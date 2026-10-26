@@ -21,6 +21,7 @@ const PAGING = Object.freeze({
   required: [],
 })
 const MAX_RESULT_CHARS = 64_000
+const MAX_GROUP_READ_RESPONSE_BYTES = 128 * 1024
 const DEFAULT_PAGE_LIMIT = 50
 
 function parsePaging(args) {
@@ -169,6 +170,63 @@ function projectGroup(data) {
   return finishProjection(projected, source)
 }
 
+function projectSegments(value) {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) throw invalidResponse()
+  try { return sanitizeInboundSegments(value.slice(0, 20)) } catch { throw invalidResponse() }
+}
+
+function projectEssenceItem(data) {
+  const source = projectionObject(data)
+  const projected = {
+    message_id: projectId(source.message_id),
+    sender_id: projectId(source.sender_id),
+  }
+  for (const key of ['msg_seq', 'msg_random', 'operator_time']) {
+    if (Number.isSafeInteger(source[key])) projected[key] = source[key]
+  }
+  const senderNick = projectString(source.sender_nick)
+  if (senderNick !== undefined) projected.sender_nick = senderNick
+  if (source.operator_id !== undefined) projected.operator_id = projectId(source.operator_id)
+  const operatorNick = projectString(source.operator_nick)
+  if (operatorNick !== undefined) projected.operator_nick = operatorNick
+  const content = projectSegments(source.content)
+  if (content !== undefined) projected.content = content
+  return projected
+}
+
+function projectHonorMember(data) {
+  const source = projectionObject(data)
+  const projected = { user_id: projectId(source.user_id) }
+  const nickname = projectString(source.nickname)
+  if (nickname !== undefined) projected.nickname = nickname
+  const description = projectString(source.description)
+  if (description !== undefined) projected.description = description
+  return projected
+}
+
+function projectHonorList(value) {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) throw invalidResponse()
+  return value.slice(0, 50).map(projectHonorMember)
+}
+
+function projectHonor(data, expected) {
+  const source = projectionObject(data)
+  const projected = { group_id: projectId(source.group_id) }
+  requireSameId(projected.group_id, expected?.group_id)
+  if (source.current_talkative !== undefined && source.current_talkative !== null) {
+    if (typeof source.current_talkative !== 'object' || Array.isArray(source.current_talkative)) throw invalidResponse()
+    if (Object.keys(source.current_talkative).length > 0) {
+      projected.current_talkative = projectHonorMember(source.current_talkative)
+    }
+  }
+  for (const key of ['talkative_list', 'performer_list', 'legend_list', 'emotion_list', 'strong_newbie_list']) {
+    projected[key] = projectHonorList(source[key])
+  }
+  return projected
+}
+
 /**
  * `get_msg` is the only capability that returns a platform message body. Build
  * an explicit whitelist so `raw_message`, CQ strings, media URLs/paths and
@@ -304,6 +362,24 @@ const EXECUTABLE = new Map([
     parameters: PAGING,
     projectItem: projectGroup,
     execute: () => ({}) }],
+  ['qq.get_essence_msg_list', { action: 'get_essence_msg_list', category: 'group', risk: 'low',
+    description: 'Read a bounded page of this Session’s group essence messages.',
+    parameters: PAGING,
+    projectItem: projectEssenceItem,
+    precheckRaw: true,
+    execute: (_args, scene) => {
+      if (scene.kind !== 'group') throw new Error('QQ_GROUP_ONLY')
+      return { group_id: scene.peerId }
+    } }],
+  ['qq.get_group_honor_info', { action: 'get_group_honor_info', category: 'group', risk: 'low',
+    description: 'Read this Session’s group honor summary and bounded member lists.',
+    parameters: EMPTY,
+    project: projectHonor,
+    precheckRaw: true,
+    execute: (_args, scene) => {
+      if (scene.kind !== 'group') throw new Error('QQ_GROUP_ONLY')
+      return { group_id: scene.peerId, type: 'all' }
+    } }],
 ])
 
 function validateArgs(args, schema) {
@@ -376,13 +452,18 @@ export class CapabilityRegistry {
       throw new Error(`QQ_PERMISSION_DENIED: ${requiredCapability}`)
     }
     validateArgs(args, definition.parameters)
-    const paging = id === 'qq.get_friend_list' || id === 'qq.get_group_list' ? parsePaging(args) : null
+    const paging = id === 'qq.get_friend_list' || id === 'qq.get_group_list' || id === 'qq.get_essence_msg_list'
+      ? parsePaging(args)
+      : null
     if (this.transport.status !== 'connected') throw new Error('QQ_TRANSPORT_UNAVAILABLE')
     const params = definition.execute(args, scene, { store: this.store })
-    const data = await this.transport.action(definition.action, params)
+    const data = definition.precheckRaw === true
+      ? await this.transport.action(definition.action, params, 10_000, MAX_GROUP_READ_RESPONSE_BYTES)
+      : await this.transport.action(definition.action, params)
     // Reject an oversized raw platform response before shaping it. This keeps
     // the bounded-result guarantee even when the whitelist would discard it.
-    if (id === 'qq.get_msg' && (JSON.stringify(data)?.length ?? 0) > MAX_RESULT_CHARS) {
+    if ((id === 'qq.get_msg' || definition.precheckRaw === true) &&
+      (JSON.stringify(data)?.length ?? 0) > MAX_RESULT_CHARS) {
       throw new Error('QQ_CAPABILITY_RESULT_TOO_LARGE')
     }
     // Any Scene read grant may be revoked while the platform call is in flight.

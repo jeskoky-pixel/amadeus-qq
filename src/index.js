@@ -5,6 +5,7 @@ import { OneBotAdapter } from './onebot.js'
 import { acquireInstanceLease } from './lease.js'
 import { CapabilityRegistry } from './capabilities.js'
 import { readMessageImage } from './media.js'
+import { readMessageFile, readMessageVideo } from './files.js'
 import { transcribeMessageRecord } from './audio.js'
 import { Config } from './config.js'
 import { apply as applyPresetGuard } from './preset-guard.mjs'
@@ -18,7 +19,7 @@ const QQ_TOOL_NAMES = Object.freeze([
   'qq_send_message', 'qq_wait_for_messages', 'qq_get_unread_messages',
   'qq_mark_read', 'qq_connection_status', 'qq_capability_search',
   'qq_capability_describe', 'qq_capability_execute', 'qq_read_message_image',
-  'qq_transcribe_message_record',
+  'qq_transcribe_message_record', 'qq_read_message_file', 'qq_read_message_video',
 ])
 const QQ_TOOL_SET = new Set(QQ_TOOL_NAMES)
 const JSON_OBJECT = Object.freeze({ type: 'object', additionalProperties: true })
@@ -287,41 +288,105 @@ export function apply(ctx, config = {}) {
   // this tool; a configured mediaRoot is still required for a successful read.
   if (typeof ctx.inject === 'function') {
     let imageToolRegistered = false
+    let fileToolRegistered = false
     try { ctx.inject(['attachments'], scope => {
       const attachments = scope?.attachments ?? ctx.attachments
-      if (imageToolRegistered || !attachments || typeof attachments.saveImage !== 'function') return
-      imageToolRegistered = true
-      registerTool(ctx, {
-        name: 'qq_read_message_image',
-        description: 'Read one image already present in this Session’s bound QQ message, using only the message ID and image ordinal.',
-        parameters: { type: 'object', additionalProperties: false, properties: {
-          messageId: { type: 'string' },
-          index: { type: 'integer', minimum: 0 },
-        }, required: ['messageId'] },
-        output: {
-          schema: JSON_OBJECT,
-          render: (_args, value) => {
-            const blocks = [{ type: 'text', text: 'QQ image loaded as an attachment.' }]
-            if (value?.attachment && typeof value.attachment === 'object') {
-              blocks.push({ type: 'image', attachment: value.attachment })
-            }
-            return blocks
+      if (!attachments) return
+      if (!imageToolRegistered && typeof attachments.saveImage === 'function') {
+        imageToolRegistered = true
+        registerTool(ctx, {
+          name: 'qq_read_message_image',
+          description: 'Read one image already present in this Session’s bound QQ message, using only the message ID and image ordinal.',
+          parameters: { type: 'object', additionalProperties: false, properties: {
+            messageId: { type: 'string' },
+            index: { type: 'integer', minimum: 0 },
+          }, required: ['messageId'] },
+          output: {
+            schema: JSON_OBJECT,
+            render: (_args, value) => {
+              const blocks = [{ type: 'text', text: 'QQ image loaded as an attachment.' }]
+              if (value?.attachment && typeof value.attachment === 'object') {
+                blocks.push({ type: 'image', attachment: value.attachment })
+              }
+              return blocks
+            },
           },
-        },
-        execute: (args, exec) => readMessageImage({
-          core,
-          store,
-          transport,
-          attachments,
-          mediaRoot: config.mediaRoot,
-          sessionId: sessionIdOf(exec),
-          messageId: args.messageId,
-          index: args.index ?? 0,
-        }),
-      })
+          execute: (args, exec) => readMessageImage({
+            core,
+            store,
+            transport,
+            attachments,
+            mediaRoot: config.mediaRoot,
+            sessionId: sessionIdOf(exec),
+            messageId: args.messageId,
+            index: args.index ?? 0,
+          }),
+        })
+      }
+      if (!fileToolRegistered && typeof attachments.saveFile === 'function') {
+        fileToolRegistered = true
+        registerTool(ctx, {
+          name: 'qq_read_message_file',
+          description: 'Read one file already present in this Session’s bound QQ message, using only the message ID and file ordinal.',
+          parameters: { type: 'object', additionalProperties: false, properties: {
+            messageId: { type: 'string' },
+            index: { type: 'integer', minimum: 0 },
+          }, required: ['messageId'] },
+          timeoutMs: 60_000,
+          output: {
+            schema: JSON_OBJECT,
+            render: (_args, value) => {
+              const blocks = [{ type: 'text', text: 'QQ file loaded as an attachment.' }]
+              if (value?.attachment && typeof value.attachment === 'object') {
+                blocks.push({ type: 'file', attachment: value.attachment })
+              }
+              return blocks
+            },
+          },
+          execute: (args, exec) => readMessageFile({
+            core,
+            store,
+            transport,
+            attachments,
+            mediaRoot: config.mediaRoot,
+            sessionId: sessionIdOf(exec),
+            messageId: args.messageId,
+            index: args.index ?? 0,
+          }),
+        })
+        registerTool(ctx, {
+          name: 'qq_read_message_video',
+          description: 'Read one video already present in this Session’s bound QQ message, using only the message ID and video ordinal.',
+          parameters: { type: 'object', additionalProperties: false, properties: {
+            messageId: { type: 'string' },
+            index: { type: 'integer', minimum: 0 },
+          }, required: ['messageId'] },
+          timeoutMs: 60_000,
+          output: {
+            schema: JSON_OBJECT,
+            render: (_args, value) => {
+              const blocks = [{ type: 'text', text: 'QQ video loaded as an attachment.' }]
+              if (value?.attachment && typeof value.attachment === 'object') {
+                blocks.push({ type: 'file', attachment: value.attachment })
+              }
+              return blocks
+            },
+          },
+          execute: (args, exec) => readMessageVideo({
+            core,
+            store,
+            transport,
+            attachments,
+            mediaRoot: config.mediaRoot,
+            sessionId: sessionIdOf(exec),
+            messageId: args.messageId,
+            index: args.index ?? 0,
+          }),
+        })
+      }
     }) } catch {
       // Missing optional Host media support must not disable ordinary QQ text.
-      try { ctx.logger?.warn?.('amadeus-qq: image tool unavailable; attachment service could not be injected') } catch { /* optional diagnostic sink */ }
+      try { ctx.logger?.warn?.('amadeus-qq: attachment tools unavailable; attachment service could not be injected') } catch { /* optional diagnostic sink */ }
     }
   }
 

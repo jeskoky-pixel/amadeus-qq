@@ -115,6 +115,31 @@ test('MP3 without a valid explicit transcoder never reaches ASR', async t => {
   assert.equal(asrCalls.length, 0)
 })
 
+test('installed NapCat style noncanonical WAV is resampled before local ASR', async t => {
+  const ffmpegPath = installedFfmpeg()
+  if (!ffmpegPath) return t.skip('ffmpeg is unavailable on this test host')
+  const { read, transport, asrCalls } = fixture(t)
+  const napcatWav = wav()
+  napcatWav.writeUInt32LE(24000, 24)
+  napcatWav.writeUInt32LE(48000, 28)
+  transport.action = async () => ({ base64: napcatWav.toString('base64') })
+  assert.deepEqual(await read({ ffmpegPath }), { text: 'synthetic transcript' })
+  const audio = Buffer.from(asrCalls[0].spec.audio)
+  assert.equal(audio.readUInt32LE(24), 16000)
+  assert.equal(audio.readUInt32LE(28), 32000)
+  assert.equal(audio.readUInt16LE(22), 1)
+})
+
+test('noncanonical WAV cannot silently bypass missing transcoder', async t => {
+  const { read, transport, asrCalls } = fixture(t)
+  const napcatWav = wav()
+  napcatWav.writeUInt32LE(24000, 24)
+  napcatWav.writeUInt32LE(48000, 28)
+  transport.action = async () => ({ base64: napcatWav.toString('base64') })
+  await assert.rejects(read(), /QQ_MEDIA_TRANSCODER_UNAVAILABLE/)
+  assert.equal(asrCalls.length, 0)
+})
+
 test('record transcription rejects malformed or oversized inline bytes before ASR', async t => {
   const { read, transport, asrCalls } = fixture(t)
   transport.action = async () => ({ base64: wav().toString('base64') + '$' })

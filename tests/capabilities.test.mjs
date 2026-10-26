@@ -288,3 +288,95 @@ test('revoking ordinary Scene read during an in-flight OneBot response prevents 
   await assert.rejects(request, /QQ_PERMISSION|QQ_UNAUTHORIZED/)
   core.close()
 })
+
+test('group essence reads bind the group, project safe fields and reject foreign scenes', async t => {
+  const { registry, core, transport } = fixture(t)
+  let seen
+  transport.action = async (name, args) => {
+    seen = { name, args }
+    assert.equal(name, 'get_essence_msg_list')
+    return [{
+      message_id: 70001, msg_seq: 1, msg_random: 2,
+      sender_id: 40001, sender_nick: 'Sender',
+      operator_id: 10001, operator_nick: 'Operator', operator_time: 3,
+      content: [{ type: 'text', data: { text: 'kept' } },
+        { type: 'image', data: { file: 'C:\\private\\image.png', url: 'https://secret.invalid/token' } }],
+      extra: 'hidden',
+    }]
+  }
+  await assert.rejects(registry.execute('private-session', 'qq.get_essence_msg_list'), /GROUP_ONLY/)
+  const result = await registry.execute('group-session', 'qq.get_essence_msg_list', { offset: 0, limit: 10 })
+  assert.equal(result.items.length, 1)
+  assert.equal(result.total, 1)
+  assert.equal(result.items[0].sender_nick, 'Sender')
+  assert.match(JSON.stringify(result), /kept/)
+  assert.equal(JSON.stringify(result).includes('secret.invalid'), false)
+  assert.equal(JSON.stringify(result).includes('private\\image'), false)
+  assert.equal(JSON.stringify(result).includes('hidden'), false)
+  assert.deepEqual(seen, { name: 'get_essence_msg_list', args: { group_id: '20001' } })
+  core.close()
+})
+
+test('group honor reads bind the group and drop avatars, extra fields and unsafe members', async t => {
+  const { registry, core, transport } = fixture(t)
+  let seen
+  const member = overrides => ({ user_id: 40001, nickname: 'Member', avatar: 'https://secret.invalid/a', extra: 'hidden', ...overrides })
+  transport.action = async (name, args) => {
+    seen = { name, args }
+    assert.equal(name, 'get_group_honor_info')
+    return { group_id: 20001, current_talkative: member({}), talkative_list: [member({})],
+      performer_list: [], legend_list: [], emotion_list: [], strong_newbie_list: [] }
+  }
+  await assert.rejects(registry.execute('private-session', 'qq.get_group_honor_info'), /GROUP_ONLY/)
+  const result = await registry.execute('group-session', 'qq.get_group_honor_info')
+  assert.equal(result.data.group_id, '20001')
+  assert.equal(result.data.talkative_list[0].nickname, 'Member')
+  assert.equal(JSON.stringify(result).includes('secret.invalid'), false)
+  assert.equal(JSON.stringify(result).includes('hidden'), false)
+  assert.deepEqual(seen, { name: 'get_group_honor_info', args: { group_id: '20001', type: 'all' } })
+  transport.action = async () => ({ group_id: 99999, talkative_list: [] })
+  await assert.rejects(registry.execute('group-session', 'qq.get_group_honor_info'), /SCOPE_MISMATCH/)
+  core.close()
+})
+
+test('honor bodies stay bounded and forward stays closed without a durable forward ID', async t => {
+  const { registry, core, transport } = fixture(t)
+  transport.action = async () => ({ group_id: 20001, talkative_list: [{ user_id: 40001, nickname: 'x'.repeat(70_000) }] })
+  await assert.rejects(registry.execute('group-session', 'qq.get_group_honor_info'), /RESULT_TOO_LARGE/)
+  assert.throws(() => registry.describe('qq.get_forward_msg'), /QQ_CAPABILITY_UNKNOWN/)
+  assert.equal(registry.describe('napcat.get_forward_msg').executable, false)
+  core.close()
+})
+
+test('new group-wide reads bound the OneBot response before JSON parsing', async t => {
+  const { registry, core, transport } = fixture(t)
+  const seen = []
+  transport.action = async (name, _args, _timeoutMs, maxResponseBytes) => {
+    seen.push({ name, maxResponseBytes })
+    return name === 'get_essence_msg_list' ? [] : { group_id: 20001 }
+  }
+  await registry.execute('group-session', 'qq.get_essence_msg_list')
+  await registry.execute('group-session', 'qq.get_group_honor_info')
+  assert.deepEqual(seen.map(item => item.name), ['get_essence_msg_list', 'get_group_honor_info'])
+  for (const item of seen) {
+    assert.ok(Number.isSafeInteger(item.maxResponseBytes) && item.maxResponseBytes <= 128 * 1024,
+      `${item.name} must cap transport bytes before parsing`)
+  }
+  core.close()
+})
+
+test('revoking an essence read while the response is in flight prevents disclosure', async t => {
+  const { registry, core, transport } = fixture(t)
+  const group = { botId: '10001', kind: 'group', peerId: '20001' }
+  let entered
+  const started = new Promise(resolve => { entered = resolve })
+  let release
+  const reply = new Promise(resolve => { release = resolve })
+  transport.action = async () => { entered(); return reply }
+  const request = registry.execute('group-session', 'qq.get_essence_msg_list')
+  await started
+  core.store.setScenePermissions(group, { mode: 'observe', overrides: {} })
+  release([{ message_id: 70001, sender_id: 40001, content: [{ type: 'text', data: { text: 'revoked essence' } }] }])
+  await assert.rejects(request, /QQ_PERMISSION|QQ_UNAUTHORIZED/)
+  core.close()
+})

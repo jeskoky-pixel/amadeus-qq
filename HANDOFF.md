@@ -1,5 +1,11 @@
 # amadeus-qq 交接
 
+## 当前 M3 开发检查点（2026-10-27，NapCat 安装源码核查与媒体读取）
+
+只读核查了本机安装的 NapCat 核心 `napcat.mjs`：`get_record` 的 `out_format` 列表与本地 file/base64 返回路径已确认；外部 FFmpeg 分支没有保证 WAV 为 16 kHz，故本地 ASR 新增结构完整的非 16 kHz PCM16 WAV 转码。`get_file` 的 file/file_id 与 file/url/可选 base64 契约也已核实，但独立无头实例未确认正在运行，没有调用真实 QQ API。详情见 `docs/verification/LOCAL_NAPCAT_INTERFACE_2026-10-27.md`。
+
+原核心和媒体 DSH Creator 会话合批实现群精华/荣誉只读投影、当前 Scene 持久消息的文件/视频读取；Codex 审查后为群读取补上 JSON 解析前 128 KiB 响应上限。文件/视频只允许受控本地路径或有界内联字节，模型不提供任意路径/URL。当前 `npm test` 为 161 通过、0 失败、3 跳过；构建与 diff check 通过。这些新增能力尚未做集中 DSH Desktop 安装、模型调用和重启验收；现有 M1/权限/GUI 验收仍有效。下一步主线是 M2–M5 的媒体发送、QQ 空间、Owner Agent 实际权限和生态联动，不再对每个小修改重复 Desktop 验收。PR #1 保持 Draft，不可部署。
+
 ## 当前开发检查点（2026-10-27，合批开发，Desktop 验收待完成）
 
 继续复用三个隔离官方 DeepSeek Flash Creator 会话，由 Codex 先写失败回归、DSH 按核心/媒体/GUI 文件范围修复、Codex 复审。发送账本增加仅认证 Owner 可用的 unknown 投递人工对账：在途、已送达和非 unknown 状态不能标失败；Settings 必须输入同 Scene 的完整 actionId 才允许操作，且不自动重发。能力拒绝原因已有固定说明。语音读取增加显式 `ffmpegPath` 的本地 MP3→canonical WAV 路径；Codex 在本机真实 ffmpeg 上跑通合成 MP3 单元测试。`npm test` 为 145 通过、0 失败、2 项 Windows 符号链接跳过；构建与 `git diff --check` 通过。当前更改还未进行合批 DSH Desktop 安装、GUI 操作和重启验收；真实独立 NapCat 与 QQ 仍未连接。PR #1 保持 Draft，不可部署。后续应合并更多既定 v1.0 能力后集中做一次隔离 Desktop 验收，避免每个小修反复打包重启。

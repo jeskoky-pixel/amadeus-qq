@@ -14,11 +14,7 @@ const READ_TIMEOUT_MS = 5_000
 const PLATFORM_TIMEOUT_MS = 10_000
 const ASR_TIMEOUT_MS = 120_000
 const MAX_TRANSCRIPT_CHARS = 16_384
-const FFMPEG_ARGS = Object.freeze([
-  '-nostdin', '-hide_banner', '-loglevel', 'error',
-  '-f', 'mp3', '-i', 'pipe:0', '-vn', '-ac', '1', '-ar', '16000',
-  '-sample_fmt', 's16', '-f', 's16le', 'pipe:1',
-])
+const FFMPEG_ARGS = Object.freeze(['-nostdin', '-hide_banner', '-loglevel', 'error'])
 
 function mediaError(code) {
   const error = new Error(code)
@@ -196,7 +192,7 @@ function buildCanonicalWav(pcm) {
   return Buffer.concat([header, pcm])
 }
 
-function transcodeMp3ToWav(mp3, ffmpegPath) {
+function transcodeAudioToWav(input, ffmpegPath, inputFormat) {
   const executable = resolveFfmpeg(ffmpegPath)
   return new Promise((resolve, reject) => {
     let settled = false
@@ -209,7 +205,10 @@ function transcodeMp3ToWav(mp3, ffmpegPath) {
     }
     let child
     try {
-      child = spawn(executable, FFMPEG_ARGS, {
+      child = spawn(executable, [
+        ...FFMPEG_ARGS, '-f', inputFormat, '-i', 'pipe:0', '-vn',
+        '-ac', '1', '-ar', '16000', '-sample_fmt', 's16', '-f', 's16le', 'pipe:1',
+      ], {
         shell: false,
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'ignore'],
@@ -250,8 +249,31 @@ function transcodeMp3ToWav(mp3, ffmpegPath) {
       }
     })
     child.stdin.on('error', () => {})
-    child.stdin.end(mp3)
+    child.stdin.end(input)
   })
+}
+
+/** Only an intact, bounded PCM16 WAV with a different rate/channel is eligible for resampling. */
+function isConvertiblePcmWav(data) {
+  if (data.length < 46 ||
+    data.toString('ascii', 0, 4) !== 'RIFF' ||
+    data.toString('ascii', 8, 12) !== 'WAVE' ||
+    data.toString('ascii', 12, 16) !== 'fmt ' ||
+    data.readUInt32LE(16) !== 16 ||
+    data.readUInt16LE(20) !== 1 ||
+    data.toString('ascii', 36, 40) !== 'data' ||
+    data.readUInt32LE(4) !== data.length - 8 ||
+    data.readUInt32LE(40) !== data.length - 44 ||
+    data.readUInt16LE(34) !== 16) return false
+  const channels = data.readUInt16LE(22)
+  const rate = data.readUInt32LE(24)
+  const blockAlign = channels * 2
+  return (channels === 1 || channels === 2) &&
+    rate >= 8000 && rate <= 48000 &&
+    data.readUInt16LE(32) === blockAlign &&
+    data.readUInt32LE(28) === rate * blockAlign &&
+    (data.length - 44) % blockAlign === 0 &&
+    (data.length - 44) / (rate * blockAlign) <= MAX_DURATION_SECONDS
 }
 
 /** Validate the canonical 16 kHz mono PCM16 WAV accepted by the local provider. */
@@ -378,8 +400,12 @@ export async function transcribeMessageRecord({
   } else {
     throw mediaError('QQ_MEDIA_LOCAL_FILE_UNAVAILABLE')
   }
-  if (isMp3(audio)) {
-    audio = await transcodeMp3ToWav(audio, ffmpegPath)
+  if (isMp3(audio)) audio = await transcodeAudioToWav(audio, ffmpegPath, 'mp3')
+  else {
+    try { validateWav(audio) } catch (error) {
+      if (!isConvertiblePcmWav(audio)) throw error
+      audio = await transcodeAudioToWav(audio, ffmpegPath, 'wav')
+    }
   }
   validateWav(audio)
 

@@ -40,6 +40,8 @@ export const QQ_TOOL_CONTRACT = Object.freeze({
   qq_capability_execute: Object.freeze({ level: 1, capability: 'execute' }),
   qq_read_message_image: Object.freeze({ level: 2, capability: 'media.read' }),
   qq_transcribe_message_record: Object.freeze({ level: 2, capability: 'media.read' }),
+  qq_read_message_file: Object.freeze({ level: 2, capability: 'media.read' }),
+  qq_read_message_video: Object.freeze({ level: 2, capability: 'media.read' }),
 })
 
 export const QQ_TOOL_NAMES = Object.freeze(Object.keys(QQ_TOOL_CONTRACT))
