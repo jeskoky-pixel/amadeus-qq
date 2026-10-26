@@ -60,7 +60,7 @@ test('general coding presets cannot create persistent QQ Sessions', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amadeus-qq-preset-'))
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
   const statePath = path.join(dir, 'qq.json')
-  for (const agentPreset of ['cordis', 'standard', ' CORDIS ']) {
+  for (const agentPreset of ['cordis', 'standard', ' CORDIS ', 'unverified-custom-preset']) {
     assert.throws(() => apply(fakeHost().ctx, {
       enabled: true, connect: false, statePath, sessionCwd: dir, agentPreset,
     }), /QQ_UNSAFE_PRESET/)
@@ -77,7 +77,7 @@ test('host guard denies every non-QQ tool for persisted QQ Session and tool args
   store.bindSession({ botId: '10001', kind: 'private', peerId: '30001' }, 'qq-session')
   const host = fakeHost()
   apply(host.ctx, {
-    enabled: true, connect: false, statePath, sessionCwd: dir, agentPreset: 'restricted-qq',
+    enabled: true, connect: false, statePath, sessionCwd: dir, agentPreset: 'amadeus-qq',
     policy: { botIds: ['10001'], privateIds: ['30001'], groupIds: [] },
   })
   const exec = { agent: { session: { id: 'qq-session' } } }

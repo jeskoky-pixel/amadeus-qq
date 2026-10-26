@@ -51,8 +51,8 @@ function makeDshHost(ctx, config) {
   // Session must therefore have a restricted preset of its own, including
   // after the plugin is disabled or removed. Never create one from a general
   // coding preset and rely on a temporary per-Agent restriction alone.
-  if (['cordis', 'standard'].includes(config.agentPreset.trim().toLowerCase())) {
-    throw new Error('QQ_UNSAFE_PRESET: a dedicated restricted QQ agentPreset is required')
+  if (config.agentPreset !== 'amadeus-qq') {
+    throw new Error('QQ_UNSAFE_PRESET: the packaged amadeus-qq agentPreset is required')
   }
   if (typeof config.sessionCwd !== 'string' || !path.isAbsolute(config.sessionCwd)) throw new Error('QQ sessionCwd must be absolute')
   return {
