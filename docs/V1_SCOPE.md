@@ -14,7 +14,7 @@
 | Memory | QQ 可信 Scene 与 Memory 当前源码契约匹配，且有防 preset 漂移测试 | 未完成 QQ+Memory 同一 Host 的真实隐私数据隔离验收 |
 | Life | 现有 Life 只接受允许名单中的 DSH Session；QQ 不读 Life 数据，缺失时降级 | 尚未完成 Life Wake→QQ→回执实机闭环，不能声称 Scene 级授权 |
 | State | 可选降级，QQ 无硬依赖 | State 尚无稳定运行源码，未联动 |
-| 管理与交付 | 原生 Settings、Admin API 和最小 Web Console；权限冲突、同源 Owner 鉴权及 CSP 回归通过 | Web Console 新页面尚未在隔离 Desktop 做人工 GUI 操作；安装包与 PR 交付见最终报告 |
+| 管理与交付 | 原生 Settings、Admin API 和最小 Web Console；最终包隔离 Desktop HTTP 路由、匿名拒绝、CSP 与禁连状态已验收 | Web Console 新页面尚未做人工 GUI 操作；安装包与 PR 交付见最终报告 |
 
 ## 已移出 v1.0 门槛
 

@@ -2,7 +2,7 @@
 
 ## 最新检查点（2026-10-27，真实 NapCat/QQ 与 v1.0 收尾）
 
-当前候选已通过 253 项测试、0 失败、4 跳过，构建与差异检查通过。隔离 DSH 模型实际调用 Owner 的 `pwsh`/`read`、QQ 原生 ASR、私聊发送、账号资料与 QQ 空间工具；真实 NapCat 私聊文字/图片/语音收发、`fetch_ptt_text`、头像/签名修改及恢复、仅自己可见说说发布和删除也已验证。重启后相同私聊与空间 `actionId` 去重有效。新增最小同源 Web Console，尚未完成实机 GUI 手动操作。当前隔离 QQ 插件停用、`connect:false`，测试 NapCat 已停止，原生产 SnowLuma 配置未改。完整证据与未验收边界见[最终验收记录](docs/verification/V1_REAL_NAPCAT_2026-10-27.md)，最新剩余清单见[收缩版 v1.0 范围](docs/V1_SCOPE.md)。PR #1 保持 Draft，不自动合并部署。以下为历史检查点。
+当前候选已通过 253 项测试、0 失败、4 跳过，构建与差异检查通过。隔离 DSH 模型实际调用 Owner 的 `pwsh`/`read`、QQ 原生 ASR、私聊发送、账号资料与 QQ 空间工具；真实 NapCat 私聊文字/图片/语音收发、`fetch_ptt_text`、头像/签名修改及恢复、仅自己可见说说发布和删除也已验证。重启后相同私聊与空间 `actionId` 去重有效。最终安装包在隔离 Desktop 硬重启加载，最小同源 Web Console 的真实 Host HTTP 路由、匿名拒绝与 CSP 已通过；尚未人工操作页面。当前隔离 QQ 插件停用、`connect:false`，测试 NapCat 已停止，原生产 SnowLuma 配置未改。完整证据与未验收边界见[最终验收记录](docs/verification/V1_REAL_NAPCAT_2026-10-27.md)，最新剩余清单见[收缩版 v1.0 范围](docs/V1_SCOPE.md)。PR #1 保持 Draft，不自动合并部署。以下为历史检查点。
 
 ## 最新检查点（2026-10-27，M2–M5 集中隔离验收）
 

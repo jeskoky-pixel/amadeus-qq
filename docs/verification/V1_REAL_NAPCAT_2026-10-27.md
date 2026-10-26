@@ -18,13 +18,13 @@
 | 账号资料 | 模型工具修改测试号签名和头像成功；签名读回，头像经平台外部接口读回测试图。两者已恢复原内容。头像经 QQ 平台重编码，恢复后视觉一致但字节哈希不同。 |
 | QQ 空间 | `qq_qzone` 用 `audience:self` 发布文字和图片说说，均返回 tid；两个测试 tid 随后通过 NapCat 删除。其他可见范围及互动动作未作真实平台验收。 |
 | 重启持久性 | 隔离 DSH 硬重启后复用相同私聊和空间 `actionId`，返回 `repeated:true`；私聊历史中测试文字只有一条。 |
-| 管理 Web Console | 同源静态页面复用现有 Admin API；单元/集成测试覆盖 Owner admission、跨源拒绝、CSP、权限 revision 冲突、POST 标记与元数据投影。页面尚未在 Desktop 浏览器人工操作。 |
+| 管理 Web Console | 最终包安装到隔离官方 DSH Desktop 后，经 Host HTTP 取得页面、脚本与 Scene API（均 200），匿名请求 401，CSP 生效且 transport 为 disabled。单元/集成测试覆盖 Owner admission、跨源拒绝、权限 revision 冲突、POST 标记与元数据投影。页面尚未在 Desktop 浏览器人工操作。 |
 
 ## 代码门禁与安装产物
 
 - `npm test`：253 通过、0 失败、4 跳过。跳过项主要为当前 Windows 符号链接/可选外部环境限制。
 - `npm run build` 与 `git diff --check` 通过。
-- `npm pack` 的脱敏产物为 `dist/amadeus-qq-0.1.0.tgz`，SHA-256：`D3D5F08C2D2ECC99E6ABDD1FA8C113D4CCD9BEDFF540BCCEA32F7CF710FD0BB4`。包内仅包含 README、patch、构建后的客户端、源代码、构建脚本与 package metadata，不含私有 QA 状态和真实凭据。
+- `npm pack` 的脱敏产物为 `dist/amadeus-qq-0.1.0.tgz`，SHA-256：`D3D5F08C2D2ECC99E6ABDD1FA8C113D4CCD9BEDFF540BCCEA32F7CF710FD0BB4`。包内仅包含 README、patch、构建后的客户端、源代码、构建脚本与 package metadata，不含私有 QA 状态和真实凭据。该包已在隔离 DSH Desktop 安装并经硬重启加载；验收后 Bundle 再次停用，QQ 连接保持关闭。
 
 ## 尚未验证及部署建议
 
