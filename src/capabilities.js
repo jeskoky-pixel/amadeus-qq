@@ -214,11 +214,9 @@ export class CapabilityRegistry {
     if (id === 'qq.get_msg' && (JSON.stringify(data)?.length ?? 0) > MAX_RESULT_CHARS) {
       throw new Error('QQ_CAPABILITY_RESULT_TOO_LARGE')
     }
-    // A directory grant may be revoked while the platform call is in flight.
-    // Re-check the same capability against the current binding/revision before
-    // any response bytes are shaped into model-visible output.
-    if (requiredCapability !== 'qq.read' &&
-      this.core.authorizeSessionCapability(sessionId, requiredCapability) !== true) {
+    // Any Scene read grant may be revoked while the platform call is in flight.
+    // Re-check the current binding and capability before shaping model output.
+    if (this.core.authorizeSessionCapability(sessionId, requiredCapability) !== true) {
       throw new Error(`QQ_PERMISSION_CHANGED: ${requiredCapability} was revoked during the read`)
     }
     let result

@@ -2,7 +2,7 @@
 
 ## 当前检查点（2026-10-26，Owner 目录与媒体边界）
 
-分支 `codex/m0-baseline` 和原 Draft PR #1 继续承载 v1.0 开发。原生 Settings GUI 的既有操作已在隔离 DSH Desktop 验收；本轮新增草稿切换保护通过客户端测试，真实 GUI 点击尚待复验。`dsh.search` 的真实模型调用与撤权见 `docs/verification/SEARCH_BOUNDARY_2026-10-26.md`。Owner 私聊逐项授权的好友/群目录已完成真实模型工具调用、撤权及重启测试，见 `docs/verification/DIRECTORY_BOUNDARY_2026-10-26.md`。入站媒体与 `get_msg` 定位信息清洗也经真实模型工具调用，见 `docs/verification/MEDIA_BOUNDARY_2026-10-26.md`。`npm test` 当前 110/110。隔离 Profile 已恢复 `connect: false`，真实 QQ 未连接。通用 Owner Agent、媒体内容读取/发送、空间、Life/State 联动和独立 NapCat 实机兼容仍未完成，PR 不可合并部署。
+分支 `codex/m0-baseline` 和原 Draft PR #1 继续承载 v1.0 开发。原生 Settings GUI 的既有操作已在隔离 DSH Desktop 验收；本轮新增草稿切换保护通过客户端测试，真实 GUI 点击尚待复验。`dsh.search` 的真实模型调用与撤权见 `docs/verification/SEARCH_BOUNDARY_2026-10-26.md`。Owner 私聊逐项授权的好友/群目录已完成真实模型工具调用、撤权及重启测试，见 `docs/verification/DIRECTORY_BOUNDARY_2026-10-26.md`。入站媒体与 `get_msg` 定位信息清洗也经真实模型工具调用，见 `docs/verification/MEDIA_BOUNDARY_2026-10-26.md`。`npm test` 当前 111/111。隔离 Profile 已恢复 `connect: false`，真实 QQ 未连接。通用 Owner Agent、媒体内容读取/发送、空间、Life/State 联动和独立 NapCat 实机兼容仍未完成，PR 不可合并部署。
 
 以下为保留的早期 M1 与 M0 历史记录，相关测试数字和阻断状态以当前检查点为准。
 

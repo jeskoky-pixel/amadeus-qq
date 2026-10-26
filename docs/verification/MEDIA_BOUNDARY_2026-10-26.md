@@ -10,7 +10,7 @@
 
 ## 验证
 
-`npm run build` 成功，`npm test` 为 110/110，`git diff --check` 通过。QA.40 安装包经官方 Plugin Manager 安装，SHA-256 为 `3C504988A9406DD69AF24D1FD3822EFE63FBAE35F228C32FFA6ABFFE77E93D5F`。
+`npm run build` 成功，QA.40 安装时 `npm test` 为 110/110，`git diff --check` 通过。QA.40 安装包经官方 Plugin Manager 安装，SHA-256 为 `3C504988A9406DD69AF24D1FD3822EFE63FBAE35F228C32FFA6ABFFE77E93D5F`。后续独立审查发现普通 `qq.read` 在 OneBot 响应期间撤权时缺少二次校验，已补回归和修复；当前 111/111。此新增竞态只完成单元测试，未在 QA.40 的真实 Host 中重现竞态。
 
 | 隔离 Desktop 验证 | 结果 |
 | --- | --- |

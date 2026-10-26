@@ -187,3 +187,20 @@ test('revoking an Owner directory read during OneBot response prevents disclosur
   await assert.rejects(request, /PERMISSION|CHANGED/)
   core.close()
 })
+
+test('revoking ordinary Scene read during an in-flight OneBot response prevents disclosure', async t => {
+  const { registry, core, transport } = fixture(t)
+  const group = { botId: '10001', kind: 'group', peerId: '20001' }
+  core.store.appendMessage(group, { messageId: '804', senderId: '40001', segments: [] })
+  let entered
+  const started = new Promise(resolve => { entered = resolve })
+  let release
+  const reply = new Promise(resolve => { release = resolve })
+  transport.action = async () => { entered(); return reply }
+  const request = registry.execute('group-session', 'qq.get_msg', { messageId: '804' })
+  await started
+  core.store.setScenePermissions(group, { mode: 'safe-chat', overrides: { 'qq.read': 'deny' } })
+  release({ message_id: 804, message: [{ type: 'text', data: { text: 'revoked message' } }] })
+  await assert.rejects(request, /QQ_PERMISSION|QQ_UNAUTHORIZED/)
+  core.close()
+})
