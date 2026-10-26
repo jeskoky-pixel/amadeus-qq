@@ -1,6 +1,12 @@
 # amadeus-qq 交接
 
-## 最新检查点（2026-10-26，M1 隔离候选）
+## 当前检查点（2026-10-26，QQ 搜索权限）
+
+分支 `codex/m0-baseline` 和原 Draft PR #1 继续承载 v1.0 开发。原生 Settings GUI 已在隔离 DSH Desktop 验收；当前 `dsh.search` 的受限 preset、绑定 Scene 的真实模型工具调用、执行期撤权、新 Session 工具收缩及硬重启持久性也已验收，见 `docs/verification/SEARCH_BOUNDARY_2026-10-26.md`。`npm test` 当前 101/101。QA Profile 已恢复 `connect: false`，真实 QQ 未连接。Owner Agent、媒体、空间、Life/State 联动和独立 NapCat 实机兼容仍未完成，PR 不可合并部署。
+
+以下为保留的早期 M1 与 M0 历史记录，相关测试数字和阻断状态以当前检查点为准。
+
+## 历史 M1 检查点（2026-10-26）
 
 当前分支仍为 `codex/m0-baseline`，PR #1 未合并。先看 `docs/verification/M1_CANDIDATE_2026-10-26.md` 和当前工作树，不要把下面的 M0 历史记录当作现状。`npm test` 当前 39/39；真实隔离 DSH 的旧候选已通过双发送、模型工具调用、非 QQ 工具拒绝和模拟事件等待续接。Codex 修复了等待消息重启重复投递的回归，但修复后的真实重启链路待复验。
 

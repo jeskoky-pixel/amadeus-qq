@@ -52,7 +52,7 @@ export function toolsForLevel(level) {
  * Invalid levels throw so the preset fails activation instead of running with
  * an accidental default.
  * @param {unknown} config - preset row config.
- * @returns {{level: number, levelId: string, tools: readonly string[]}} policy.
+ * @returns {{level: number, levelId: string, tools: readonly string[], allowSearch: boolean}} policy.
  */
 export function resolveQQPermissionPolicy(config = {}) {
   if (config === null || typeof config !== 'object' || Array.isArray(config)) {
@@ -62,8 +62,11 @@ export function resolveQQPermissionPolicy(config = {}) {
   if (!Number.isInteger(level) || level < 0 || level > MAX_QQ_PERMISSION_LEVEL) {
     throw new TypeError(`QQ preset level must be an integer from 0 to ${MAX_QQ_PERMISSION_LEVEL}`)
   }
+  const allowSearch = config.allowSearch === undefined ? false : config.allowSearch
+  if (typeof allowSearch !== 'boolean') throw new TypeError('QQ preset allowSearch must be a boolean')
   const entry = QQ_PERMISSION_LEVELS[level]
-  return Object.freeze({ level, levelId: entry.id, tools: Object.freeze(toolsForLevel(level)) })
+  const tools = allowSearch ? [...toolsForLevel(level), 'web_search'] : toolsForLevel(level)
+  return Object.freeze({ level, levelId: entry.id, tools: Object.freeze(tools), allowSearch })
 }
 
 /**
@@ -89,9 +92,30 @@ export function apply(ctx, config = {}) {
     }
   }
 
+  const authorizeSearch = exec => {
+    const sessionId = exec?.agent?.session?.id
+    if (typeof sessionId !== 'string' || !sessionId) return false
+    let service
+    try {
+      service = typeof ctx.get === 'function' ? ctx.get('qq') : undefined
+    } catch {
+      return false
+    }
+    if (!service || typeof service.authorizeSessionCapability !== 'function') return false
+    try {
+      return service.authorizeSessionCapability(sessionId, 'dsh.search') === true
+    } catch {
+      return false
+    }
+  }
+
   ctx.tools.guard(exec => {
     const tool = exec?.name
     if (typeof tool !== 'string') return 'QQ Session cannot use non-QQ tools'
+    if (tool === 'web_search') {
+      if (!policy.allowSearch) return 'QQ Session cannot use non-QQ tools'
+      return authorizeSearch(exec) ? undefined : 'QQ search permission denied'
+    }
     if (allowed.has(tool)) return undefined
     if (Object.hasOwn(QQ_TOOL_CONTRACT, tool)) {
       return `QQ Session permission level ${policy.level} does not allow ${tool}`

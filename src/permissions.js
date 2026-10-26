@@ -21,7 +21,7 @@ const MODE_TO_CAPABILITIES = Object.freeze({
 export const CAPABILITY_CATALOG = Object.freeze([
   Object.freeze({ id: 'qq.read', implemented: true }),
   Object.freeze({ id: 'qq.send', implemented: true }),
-  Object.freeze({ id: 'dsh.search', implemented: false }),
+  Object.freeze({ id: 'dsh.search', implemented: true }),
   Object.freeze({ id: 'qq.media.read', implemented: false }),
   Object.freeze({ id: 'qq.qzone.publish', implemented: false }),
   Object.freeze({ id: 'dsh.shell', implemented: false }),

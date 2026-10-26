@@ -3,13 +3,17 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { PermissionEngine, MODE_IDS } from '../src/permissions.js'
+import { PermissionEngine, MODE_IDS, CAPABILITY_CATALOG } from '../src/permissions.js'
 import { QQStore } from '../src/storage.js'
 
 const groupA = { botId: '10001', kind: 'group', peerId: '20001' }
 const groupB = { botId: '10001', kind: 'group', peerId: '20002' }
 const ownerPrivate = { botId: '10001', kind: 'private', peerId: '30001' }
 const otherPrivate = { botId: '10001', kind: 'private', peerId: '30002' }
+
+test('capability catalog reports search as executable after the guarded Host path is installed', () => {
+  assert.equal(CAPABILITY_CATALOG.find(item => item.id === 'dsh.search')?.implemented, true)
+})
 
 test('five modes only change capabilities and keep their exact product identities', () => {
   assert.deepEqual(MODE_IDS, ['observe', 'safe-chat', 'enhanced', 'autonomous-social', 'owner-agent'])

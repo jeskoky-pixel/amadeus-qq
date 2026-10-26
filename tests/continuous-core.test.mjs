@@ -26,10 +26,10 @@ function fixture(t, options = {}) {
   const events = []
   let nextSession = 1
   const dsh = {
-    async createSceneSession(scene) {
+    async createSceneSession(scene, grant) {
       const sessionId = `session-${nextSession++}`
       events.push(['create', scene.kind, scene.peerId, sessionId])
-      if (options.create) await options.create(scene, sessionId)
+      if (options.create) await options.create(scene, sessionId, grant)
       return { sessionId }
     },
     async prompt(request) { events.push(['prompt', request.sessionId, request.requestId]); return options.prompt?.(request) ?? { accepted: true } },
@@ -50,6 +50,22 @@ function fixture(t, options = {}) {
   })
   return { file, events, dsh, transport, make }
 }
+
+test('Scene search grant reaches Session creation and revision change removes it', async t => {
+  const grants = []
+  const f = fixture(t, { create: (_scene, _sessionId, grant) => grants.push(grant?.searchAllowed) })
+  const core = f.make()
+  const first = await core.ingest(group('101'))
+  assert.equal(first.status, 'prompted')
+  assert.deepEqual(grants, [true], 'safe-chat may receive the explicit DSH search grant')
+  await core.setScenePermissions({ botId, kind: 'group', peerId: '20001' },
+    { mode: 'safe-chat', overrides: { 'dsh.search': 'deny' } })
+  const second = await core.ingest(group('102'))
+  assert.equal(second.status, 'prompted')
+  assert.notEqual(second.sessionId, first.sessionId)
+  assert.deepEqual(grants, [true, false], 'the new Session must not inherit the revoked search grant')
+  core.close()
+})
 
 test('one activity sends, uses another tool, sends again, waits and continues same Session', async t => {
   const f = fixture(t)

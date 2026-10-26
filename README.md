@@ -2,7 +2,7 @@
 
 通过独立无头 NapCat 接入 QQ，维护持续收发、工具操作、等待续接、媒体、路由、去重和回执。
 
-**当前状态：v1.0 隔离开发候选，PR #1 仍为 Draft。**已有独立 DSH 插件包、持续 Session 核心、模拟 OneBot 回放、受限 Agent preset、逐 Scene 权限管理接口和原生 Settings GUI。隔离 DSH Desktop 已验证 GUI 场景选择、权限保存、并发冲突及重启持久性；测试记录见 [GUI 隔离验收](docs/verification/GUI_STAGE_2026-10-26.md)。目前仅 `qq.read`、`qq.send` 有对应运行路径；GUI 中其余能力明确标为策略占位。独立无头 NapCat、真实 QQ、完整媒体与空间、生态联动和跨场景 Memory 隐私尚未完成真实验收，不可部署到日常 QQ。
+**当前状态：v1.0 隔离开发候选，PR #1 仍为 Draft。**已有独立 DSH 插件包、持续 Session 核心、模拟 OneBot 回放、受限 Agent preset、逐 Scene 权限管理接口和原生 Settings GUI。隔离 DSH Desktop 已验证 GUI 场景选择、权限保存、并发冲突及重启持久性；见 [GUI 隔离验收](docs/verification/GUI_STAGE_2026-10-26.md)。`qq.read`、`qq.send` 和经 Scene 授权的 DSH `web_search` 已有运行路径；搜索的真实 Host 调用与撤权证据见 [搜索权限验收](docs/verification/SEARCH_BOUNDARY_2026-10-26.md)。媒体、空间、Shell 等能力仍标为策略占位。独立无头 NapCat、真实 QQ、完整媒体与空间、生态联动和跨场景 Memory 隐私尚未完成真实验收，不可部署到日常 QQ。
 
 项目入口：[Amadeus-dsh](https://github.com/jeskoky-pixel/Amadeus-dsh)。开发顺序：P0。当前仓库已于 2026-10-25 根据用户要求公开，便于网页端审阅。
 
@@ -27,7 +27,7 @@ QQ 交互以现用 bridge 的黑盒体验为基准，允许修改或重写。仅
 
 需求与验收关注：R-01、R-02、R-03、R-04、R-05、R-13、R-15；重点验收 A-02—A-06、A-12、A-15。
 
-下一步：在真实 DSH 中验证强制非 QQ 调用拒绝与可信 Scene/Memory 边界，补齐独立无头 NapCat 和 M2–M5 能力，再做获授权的实机验收。
+下一步：继续 Owner Agent 与其他 DSH 通用工具的执行环境边界、可信 Scene/Memory 联动，以及独立无头 NapCat 和 M2–M5 能力；获授权后再做实机验收。
 
 ## 发布与隐私
 

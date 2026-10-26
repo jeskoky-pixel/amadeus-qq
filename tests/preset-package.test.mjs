@@ -28,9 +28,18 @@ test('the preset mounts the package root with the guard branch, not an unloadabl
   assert.doesNotMatch(active, /^\s+level: /m)
 })
 
-test('the preset declares only the QQ tool contract and no persona or character card', () => {
+test('a separate search preset uses the existing Host web provider and no persona', () => {
   const active = presetPatch.split('\n').filter(line => !line.trim().startsWith('#')).join('\n')
   assert.doesNotMatch(active, /dsh-persona|persona|character|roleplay/i)
+  assert.match(active, /id: amadeus-qq-search/)
+  assert.match(active, /name: '@deepseek-ai\/dsh-tool-web'/,
+    'the Web surface disables the global tool-web row, so this preset needs a scoped provider')
+  assert.match(active, /search: true/)
+  assert.match(active, /fetch: false/)
+  assert.match(active, /allowSearch: true/)
   const pluginRows = active.match(/^\s+- id: .+$/gm) ?? []
-  assert.deepEqual(pluginRows.map(row => row.trim()), ['- id: preset-amadeus-qq', '- id: qq-tool-boundary'])
+  assert.deepEqual(pluginRows.map(row => row.trim()), [
+    '- id: preset-amadeus-qq', '- id: qq-tool-boundary',
+    '- id: preset-amadeus-qq-search', '- id: qq-web-search', '- id: qq-search-boundary',
+  ])
 })

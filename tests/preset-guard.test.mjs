@@ -85,6 +85,27 @@ test('level 0 keeps observation tools and denies sends', () => {
   assert.deepEqual(state.restrictions.find(filter => filter.allow).allow, toolsForLevel(0))
 })
 
+test('search preset requires the live QQ service to approve the bound Session on every call', () => {
+  const { ctx, state } = fakeHost([...QQ_TOOL_NAMES, 'web_search'])
+  let permitted = true
+  ctx.get = name => name === 'qq' ? { authorizeSessionCapability: (sessionId, capability) =>
+    sessionId === 'bound' && capability === 'dsh.search' && permitted } : undefined
+  apply(ctx, { level: 1, allowSearch: true })
+  const call = { name: 'web_search', agent: { session: { id: 'bound' } } }
+  assert.equal(state.guards[0](call), undefined)
+  permitted = false
+  assert.match(state.guards[0](call), /QQ|search|permission/i)
+  assert.match(state.guards[0]({ ...call, agent: { session: { id: 'unbound' } } }), /QQ|search|permission/i)
+  const absent = fakeHost([...QQ_TOOL_NAMES, 'web_search'])
+  apply(absent.ctx, { level: 1, allowSearch: true })
+  assert.match(absent.state.guards[0](call), /QQ|search|permission/i,
+    'disabled or missing connector must fail closed')
+  const broken = fakeHost([...QQ_TOOL_NAMES, 'web_search'])
+  broken.ctx.get = () => { throw new Error('service unavailable') }
+  apply(broken.ctx, { level: 1, allowSearch: true })
+  assert.match(broken.state.guards[0](call), /QQ|search|permission/i)
+})
+
 test('five permission levels form the declared extension ladder', () => {
   assert.equal(QQ_PERMISSION_LEVELS.length, 5)
   assert.deepEqual(QQ_PERMISSION_LEVELS.map(entry => entry.level), [0, 1, 2, 3, 4])

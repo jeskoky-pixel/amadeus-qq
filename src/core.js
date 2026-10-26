@@ -189,7 +189,9 @@ export class QQCore {
     }
     if (!this.#can(scene, 'qq.send')) throw new Error('QQ_PERMISSION_DENIED: qq.send')
     const revision = this.#permissionRevision(row ?? {})
-    const created = await this.dsh.createSceneSession(scene)
+    const created = await this.dsh.createSceneSession(scene, {
+      searchAllowed: this.#can(scene, 'dsh.search'),
+    })
     const sessionId = typeof created === 'string' ? created : created?.sessionId
     if (!sessionId) throw new Error('DSH did not return a Session ID')
     row = this.store.getScene(scene)
@@ -358,6 +360,21 @@ export class QQCore {
   authorizedScene(sessionId) {
     const row = this.#requireAuthorizedSession(sessionId)
     return { botId: row.botId, kind: row.kind, peerId: row.peerId }
+  }
+
+  /**
+   * Synchronous execution-time capability check for the connector's Host
+   * service. The Scene comes only from the persisted Session binding; callers
+   * never supply it. Any stale binding, revision, allowlist or capability
+   * failure is reported as false.
+   */
+  authorizeSessionCapability(sessionId, capability) {
+    try {
+      this.#requireAuthorizedSession(sessionId, capability)
+      return true
+    } catch {
+      return false
+    }
   }
 
   trustedSceneForSession(sessionId) {

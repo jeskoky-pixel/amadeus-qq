@@ -34,6 +34,17 @@ test('package root branches to the preset guard before connector startup', () =>
   assert.equal(guard({ name: 'qq_send_message' }), undefined)
 })
 
+test('package root forwards search preset config to its guarded tool surface', () => {
+  let guard
+  const ctx = {
+    tools: { guard: fn => { guard = fn }, restrict: () => {} },
+    get: name => name === 'qq' ? { authorizeSessionCapability: () => true } : undefined,
+  }
+  apply(ctx, { presetGuard: true, allowSearch: true })
+  assert.equal(guard({ name: 'web_search', agent: { session: { id: 'bound' } } }), undefined)
+  assert.match(guard({ name: 'web_fetch', agent: { session: { id: 'bound' } } }), /non-QQ/)
+})
+
 function fakeHost() {
   const tools = new Map()
   const guards = []
@@ -81,6 +92,9 @@ test('DSH host creates the packaged preset without a per-Agent restriction API',
   const host = makeDshHost(ctx, { sessionCwd: dir, agentPreset: 'amadeus-qq' })
   assert.deepEqual(await host.createSceneSession(), { sessionId: 'new-qq-session', agentPreset: 'amadeus-qq' })
   assert.deepEqual(calls, [{ cwd: dir, agentPreset: 'amadeus-qq' }])
+  assert.deepEqual(await host.createSceneSession({}, { searchAllowed: true }),
+    { sessionId: 'new-qq-session', agentPreset: 'amadeus-qq-search' })
+  assert.deepEqual(calls.at(-1), { cwd: dir, agentPreset: 'amadeus-qq-search' })
   const swapped = makeDshHost({ sessionController: {
     create: async () => ({ sessionId: 'unsafe', agentPreset: 'cordis' }),
     prompt: async () => ({ accepted: true }),
@@ -102,6 +116,10 @@ test('host guard denies every non-QQ tool for persisted QQ Session and tool args
   const exec = { agent: { session: { id: 'qq-session' } } }
   assert.equal(host.guards.length, 1)
   assert.match(host.guards[0]({ ...exec, name: 'pwsh' }), /non-QQ tools/)
+  assert.equal(host.guards[0]({ ...exec, name: 'web_search' }), undefined,
+    'safe-chat search may execute only after the bound Scene is checked')
+  assert.equal(host.services.get('qq').authorizeSessionCapability('qq-session', 'dsh.search'), true)
+  assert.equal(host.services.get('qq').authorizeSessionCapability('not-bound', 'dsh.search'), false)
   assert.equal(host.guards[0]({ ...exec, name: 'qq_send_message' }), undefined)
   assert.equal(host.guards[0]({ agent: { session: { id: 'unrelated' } }, name: 'pwsh' }), undefined)
   assert.ok(host.tools.has('qq_wait_for_messages'))

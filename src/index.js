@@ -66,9 +66,12 @@ export function makeDshHost(ctx, config) {
         throw error
       }
     },
-    async createSceneSession() {
-      const created = await controller.create({ cwd: config.sessionCwd, agentPreset: config.agentPreset })
-      if (created?.agentPreset !== 'amadeus-qq') throw new Error('QQ_UNSAFE_PRESET: DSH did not create the packaged preset')
+    async createSceneSession(_scene, grant) {
+      const requestedPreset = grant?.searchAllowed === true ? 'amadeus-qq-search' : config.agentPreset
+      const created = await controller.create({ cwd: config.sessionCwd, agentPreset: requestedPreset })
+      if (created?.agentPreset !== requestedPreset) {
+        throw new Error('QQ_UNSAFE_PRESET: DSH did not create the requested packaged preset')
+      }
       return created
     },
     async prompt(request) {
@@ -105,7 +108,9 @@ export function apply(ctx, config = {}) {
   // The preset rows mount this same package root with `presetGuard: true`.
   // Branch before any connector startup requirement so the guard is owned by
   // the preset, not by the connector's enabled/statePath configuration.
-  if (config.presetGuard === true) return applyPresetGuard(ctx, { level: 1 })
+  if (config.presetGuard === true) {
+    return applyPresetGuard(ctx, { level: 1, allowSearch: config.allowSearch === true })
+  }
   if (config.enabled !== true) {
     ctx.provide('qq', Object.freeze({ getHealth: () => ({ enabled: false, status: 'disabled' }) }))
     return
@@ -163,7 +168,13 @@ export function apply(ctx, config = {}) {
   ctx.tools.guard(exec => {
     const sid = exec?.agent?.session?.id
     if (typeof sid !== 'string' || !store.isKnownSession(sid)) return undefined
-    return QQ_TOOL_SET.has(exec.name) ? undefined : 'QQ Session cannot use non-QQ tools'
+    if (QQ_TOOL_SET.has(exec.name)) return undefined
+    if (exec.name === 'web_search') {
+      return core.authorizeSessionCapability(sid, 'dsh.search')
+        ? undefined
+        : 'QQ Session search permission is not authorized'
+    }
+    return 'QQ Session cannot use non-QQ tools'
   })
 
   registerTool(ctx, {
@@ -236,6 +247,7 @@ export function apply(ctx, config = {}) {
     // In-process Host contract for cooperating plugins. The Session ID must
     // come from the active DSH Agent, never from model or HTTP arguments.
     resolveTrustedSessionScene: sessionId => core.trustedSceneForSession(sessionId),
+    authorizeSessionCapability: (sessionId, capability) => core.authorizeSessionCapability(sessionId, capability),
   }))
   ctx.effect(() => () => core.close())
   void Promise.resolve()

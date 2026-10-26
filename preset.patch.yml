@@ -18,3 +18,22 @@
             name: '@amadeus/qq'
             config:
               presetGuard: true
+    - id: preset-amadeus-qq-search
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: amadeus-qq-search
+        name: Amadeus QQ Search
+        description: Restricted QQ conversation with the Host web search boundary
+        order: 21
+        plugins:
+          - id: qq-web-search
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              search: true
+              fetch: false
+              searchTimeoutMs: 60000
+          - id: qq-search-boundary
+            name: '@amadeus/qq'
+            config:
+              presetGuard: true
+              allowSearch: true
