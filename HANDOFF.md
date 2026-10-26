@@ -1,5 +1,9 @@
 # amadeus-qq 交接
 
+## 当前检查点（2026-10-26，消息响应归属）
+
+`qq.get_msg` 现在对平台返回正文核对请求消息 ID，并核对存在的 Scene/发送者字段。Codex 失败回归、原核心 DSH Creator 修复、Codex 复审与 QA.47 真实 DSH 模型工具调用已完成；错配正文未进入模型。126 项测试中 125 通过、1 项因 Windows 符号链接权限跳过；构建通过。隔离 Host 已恢复 `connect:false`。详见 `docs/verification/GET_MSG_SCOPE_2026-10-26.md`。PR #1 仍为 Draft。
+
 ## 当前检查点（2026-10-26，只读结果投影）
 
 已开放的只读 OneBot 能力按字段投影，稳定身份结果核对受控目标。125 项测试中 124 通过、1 项因 Windows 符号链接权限跳过；构建通过。QA.46 在隔离官方 DSH Desktop 中通过真实模型目录调用，合成凭据与 URL 未进入工具结果；硬重启后恢复 `connect:false`，模拟服务已关闭。详见 `docs/verification/READ_RESULT_PROJECTION_2026-10-26.md`。PR #1 保持 Draft，独立无头 NapCat 与真实 QQ 尚未验证。

@@ -174,15 +174,45 @@ function projectGroup(data) {
  * an explicit whitelist so `raw_message`, CQ strings, media URLs/paths and
  * arbitrary platform fields never reach model context.
  */
-function projectPlatformMessage(data) {
+function projectPlatformMessage(data, expected) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('QQ_CAPABILITY_INVALID_RESPONSE')
-  const projected = {}
-  if (data.message_id !== undefined) projected.message_id = normalizeMessageId(data.message_id, 'get_msg.message_id')
+  const hasBody = data.message !== undefined || data.raw_message !== undefined
+  if (!hasBody) {
+    // Preserve the legacy boolean probe only. A bodyless response without an
+    // explicit status cannot be tied to the requested message.
+    if (typeof data.ok !== 'boolean') throw new Error('QQ_CAPABILITY_INVALID_RESPONSE')
+    return { data: { ok: data.ok } }
+  }
+
+  let messageId
+  try { messageId = normalizeMessageId(data.message_id, 'get_msg.message_id') } catch { throw new Error('QQ_CAPABILITY_INVALID_RESPONSE') }
+  if (messageId !== expected?.messageId) throw new Error('QQ_CAPABILITY_SCOPE_MISMATCH')
+
+  if (data.message_type !== undefined) {
+    if (data.message_type !== expected.scene.kind) throw new Error('QQ_CAPABILITY_SCOPE_MISMATCH')
+  }
+  if (data.group_id !== undefined) {
+    if (expected.scene.kind !== 'group') throw new Error('QQ_CAPABILITY_SCOPE_MISMATCH')
+    let groupId
+    try { groupId = normalizeId(data.group_id, 'get_msg.group_id') } catch { throw new Error('QQ_CAPABILITY_INVALID_RESPONSE') }
+    if (groupId !== expected.scene.peerId) throw new Error('QQ_CAPABILITY_SCOPE_MISMATCH')
+  }
+  if (data.sender !== null && typeof data.sender === 'object' && !Array.isArray(data.sender) &&
+    data.sender.user_id !== undefined) {
+    let senderId
+    try { senderId = normalizeId(data.sender.user_id, 'get_msg.sender.user_id') } catch { throw new Error('QQ_CAPABILITY_INVALID_RESPONSE') }
+    if (typeof expected.senderId !== 'string' || senderId !== expected.senderId) {
+      throw new Error('QQ_CAPABILITY_SCOPE_MISMATCH')
+    }
+  }
+
+  const projected = { message_id: messageId }
   if (Number.isFinite(data.time)) projected.time = data.time
   if (data.sender !== null && typeof data.sender === 'object' && !Array.isArray(data.sender)) {
     const sender = {}
     if (data.sender.user_id !== undefined) {
-      try { sender.user_id = normalizeId(data.sender.user_id, 'get_msg.sender.user_id') } catch { /* omit invalid ID */ }
+      // Already validated above for a body response.
+      sender.user_id = normalizeId(data.sender.user_id, 'get_msg.sender.user_id')
     }
     if (typeof data.sender.nickname === 'string') sender.nickname = data.sender.nickname.slice(0, 100)
     if (typeof data.sender.card === 'string') sender.card = data.sender.card.slice(0, 100)
@@ -364,7 +394,14 @@ export class CapabilityRegistry {
     if (paging) {
       if (typeof definition.projectItem !== 'function') throw new Error('QQ_CAPABILITY_PROJECTION_MISSING')
       result = pageDirectory(data, paging, definition.projectItem)
-    } else if (id === 'qq.get_msg') result = projectPlatformMessage(data)
+    } else if (id === 'qq.get_msg') {
+      const stored = this.store.getScene(scene)?.messages?.find(message => message.messageId === params.message_id)
+      result = projectPlatformMessage(data, {
+        messageId: params.message_id,
+        scene,
+        senderId: stored?.senderId,
+      })
+    }
     else if (id === 'qq.get_group_member_list') {
       if (!Array.isArray(data) || typeof definition.projectItem !== 'function') throw invalidResponse()
       const items = data.slice(0, 200).map(definition.projectItem)

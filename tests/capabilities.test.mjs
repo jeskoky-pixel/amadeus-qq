@@ -144,6 +144,27 @@ test('get_msg string-format response keeps ordinary text while removing CQ media
   core.close()
 })
 
+test('get_msg refuses a platform body that cannot be tied to the requested Scene message', async t => {
+  const { registry, core, transport } = fixture(t)
+  const group = { botId: '10001', kind: 'group', peerId: '20001' }
+  core.store.appendMessage(group, { messageId: '804', senderId: '40001', segments: [] })
+  const read = () => registry.execute('group-session', 'qq.get_msg', { messageId: '804' })
+  for (const response of [
+    { message_id: 999, message: 'wrong message' },
+    { message: 'unidentified message' },
+    { message_id: 804, message_type: 'private', message: 'wrong scene' },
+    { message_id: 804, group_id: 99999, message: 'wrong group' },
+    { message_id: 804, sender: { user_id: 50001 }, message: 'wrong sender' },
+  ]) {
+    transport.action = async () => response
+    await assert.rejects(read(), /QQ_CAPABILITY_(SCOPE_MISMATCH|INVALID_RESPONSE)/)
+  }
+  transport.action = async () => ({ message_id: 804, message_type: 'group', group_id: 20001,
+    sender: { user_id: 40001 }, message: 'correct message' })
+  assert.match(JSON.stringify(await read()), /correct message/)
+  core.close()
+})
+
 test('account directories are Owner-only, explicitly granted, paged and never take model-supplied targets', async t => {
   const { registry, core, calls } = fixture(t, { permissionPolicy: { ownerPrivateIds: ['30001'] } })
   for (const id of ['qq.get_friend_list', 'qq.get_group_list']) {
