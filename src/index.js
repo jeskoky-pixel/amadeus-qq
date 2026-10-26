@@ -41,10 +41,10 @@ function registerTool(ctx, definition) {
   })
 }
 
-function makeDshHost(ctx, config) {
+export function makeDshHost(ctx, config) {
   const controller = ctx.sessionController
-  if (typeof controller?.create !== 'function' || typeof controller?.prompt !== 'function' || typeof controller?.resolveAgent !== 'function') {
-    throw new Error('DSH sessionController create/prompt/resolveAgent is required')
+  if (typeof controller?.create !== 'function' || typeof controller?.prompt !== 'function') {
+    throw new Error('DSH sessionController create/prompt is required')
   }
   if (typeof config.agentPreset !== 'string' || !config.agentPreset) throw new Error('A restricted QQ agentPreset is required')
   // The runtime guard only exists while this plugin is enabled. A persisted QQ
@@ -67,11 +67,7 @@ function makeDshHost(ctx, config) {
     },
     async createSceneSession() {
       const created = await controller.create({ cwd: config.sessionCwd, agentPreset: config.agentPreset })
-      const agent = await controller.resolveAgent(created.sessionId)
-      if (typeof agent?.ctx?.tools?.restrict !== 'function') {
-        throw new Error('DSH per-Agent tool restriction is unavailable')
-      }
-      agent.ctx.tools.restrict({ allow: QQ_TOOL_NAMES })
+      if (created?.agentPreset !== 'amadeus-qq') throw new Error('QQ_UNSAFE_PRESET: DSH did not create the packaged preset')
       return created
     },
     async prompt(request) {

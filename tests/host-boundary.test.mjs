@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { apply } from '../src/index.js'
+import { apply, makeDshHost } from '../src/index.js'
 import { QQStore } from '../src/storage.js'
 
 test('installed package exports a persistent QQ preset guard', async () => {
@@ -67,6 +67,25 @@ test('general coding presets cannot create persistent QQ Sessions', t => {
     assert.equal(fs.existsSync(statePath), false)
     assert.equal(fs.existsSync(`${statePath}.lock`), false)
   }
+})
+
+test('DSH host creates the packaged preset without a per-Agent restriction API', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amadeus-qq-host-api-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const calls = []
+  const ctx = { sessionController: {
+    async create(request) { calls.push(request); return { sessionId: 'new-qq-session', agentPreset: request.agentPreset } },
+    async prompt() { return { accepted: true } },
+    async cancel() { return { accepted: true } },
+  } }
+  const host = makeDshHost(ctx, { sessionCwd: dir, agentPreset: 'amadeus-qq' })
+  assert.deepEqual(await host.createSceneSession(), { sessionId: 'new-qq-session', agentPreset: 'amadeus-qq' })
+  assert.deepEqual(calls, [{ cwd: dir, agentPreset: 'amadeus-qq' }])
+  const swapped = makeDshHost({ sessionController: {
+    create: async () => ({ sessionId: 'unsafe', agentPreset: 'cordis' }),
+    prompt: async () => ({ accepted: true }),
+  } }, { sessionCwd: dir, agentPreset: 'amadeus-qq' })
+  await assert.rejects(swapped.createSceneSession(), /QQ_UNSAFE_PRESET/)
 })
 
 test('host guard denies every non-QQ tool for persisted QQ Session and tool args cannot forge scene', async t => {

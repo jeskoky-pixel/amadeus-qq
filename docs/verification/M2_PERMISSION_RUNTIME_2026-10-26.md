@@ -13,7 +13,7 @@
 
 ## 自动化验证
 
-- `npm test`：76 pass、0 fail（隔离临时状态文件和模拟 OneBot）。
+- `npm test`：77 pass、0 fail（隔离临时状态文件和模拟 OneBot）。
 - 回归覆盖旧 Session 拒绝、取消失败关闭、重启后的旧 Session 索引、等待槽撤销、创建与提示期间的权限变化。
 
 ## 隔离 DSH Desktop 补验
@@ -32,3 +32,9 @@
 ## Memory Host 契约
 
 QQ 插件向同进程插件提供 `resolveTrustedSessionScene(sessionId)`。它只接受仍绑定、未撤销且具备读取权限的 DSH Session ID，返回包含 bot ID 与群/私聊 ID 的稳定 Scene；owner 标记只来自配置的稳定私聊 ID。模型工具和 HTTP 参数不能直接指定 Scene。Memory 侧需独立校验此契约并启用严格 Scene 隔离；本接口本身不授权跨 Scene 读取。
+
+## 后续真实宿主修复与联调
+
+官方 Desktop 当前不提供连接器原先假定的 `agent.ctx.tools.restrict`。真实模拟群消息曾因此在创建空 Session 后无法绑定；连接器现仅要求随包 `amadeus-qq` preset，并核验 `sessionController.create` 的实际 preset。随包 preset 负责工具可见性和执行 guard。修复后两个本机模拟群均创建、绑定并完成真实模型活动，发送只到本机模拟 OneBot。
+
+与 Memory 兼容补丁联调时，群 A 请求运行上下文只含 A 的测试记忆，群 B 只含 B；两个 `request/header` 均有 8 个 QQ 工具、0 个非 QQ 工具，用户画像块未注入。跨 Scene 的真实 QQ 平台链路仍未连接或验收。
