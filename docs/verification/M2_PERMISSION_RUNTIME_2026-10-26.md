@@ -13,7 +13,7 @@
 
 ## 自动化验证
 
-- `npm test`：75 pass、0 fail（隔离临时状态文件和模拟 OneBot）。
+- `npm test`：76 pass、0 fail（隔离临时状态文件和模拟 OneBot）。
 - 回归覆盖旧 Session 拒绝、取消失败关闭、重启后的旧 Session 索引、等待槽撤销、创建与提示期间的权限变化。
 
 ## 隔离 DSH Desktop 补验
@@ -28,3 +28,7 @@
 - 五级模式目前只接入权限决策和部分 QQ 运行路径；受限 preset 仍固定为 QQ 工具集合。Owner Agent、GUI、媒体、QQ 空间及 Memory/State/Life 联动仍需开发。
 - DSH 取消是协作式的；已经提交到 OneBot 的外部请求无法被撤回。发送账本仍按回执状态处理未知结果。
 - `setScenePermissions` 尚未暴露给原生 GUI；后续管理入口必须验证可信 owner 身份。
+
+## Memory Host 契约
+
+QQ 插件向同进程插件提供 `resolveTrustedSessionScene(sessionId)`。它只接受仍绑定、未撤销且具备读取权限的 DSH Session ID，返回包含 bot ID 与群/私聊 ID 的稳定 Scene；owner 标记只来自配置的稳定私聊 ID。模型工具和 HTTP 参数不能直接指定 Scene。Memory 侧需独立校验此契约并启用严格 Scene 隔离；本接口本身不授权跨 Scene 读取。

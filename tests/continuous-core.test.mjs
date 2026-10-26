@@ -296,6 +296,23 @@ test('permission change while creating a Session retires the orphan before it ca
   core.close()
 })
 
+test('trusted Host Scene comes only from a current bound Session and stable owner private ID', async t => {
+  const f = fixture(t, { permissionPolicy: { ownerPrivateIds: ['30001'] } })
+  const core = f.make()
+  const groupSession = (await core.ingest(group('551'))).sessionId
+  const ownerSession = (await core.ingest(privateMessage('552'))).sessionId
+  assert.deepEqual(core.trustedSceneForSession(groupSession), {
+    platform: 'qq', kind: 'group', id: '10001:20001', verified: true, admin: false,
+  })
+  assert.deepEqual(core.trustedSceneForSession(ownerSession), {
+    platform: 'qq', kind: 'private', id: '10001:30001', verified: true, admin: true,
+  })
+  assert.throws(() => core.trustedSceneForSession('forged-session'), /QQ_UNAUTHORIZED/)
+  await core.setScenePermissions({ botId, kind: 'private', peerId: '30001' }, { mode: 'observe', overrides: {} })
+  assert.throws(() => core.trustedSceneForSession(ownerSession), /QQ_UNAUTHORIZED|QQ_PERMISSION_CHANGED/)
+  core.close()
+})
+
 test('reply and mention must resolve inside the bound group scene', async t => {
   const f = fixture(t)
   const core = f.make()

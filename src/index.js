@@ -182,7 +182,12 @@ export function apply(ctx, config = {}) {
     execute: (args, exec) => capabilities.execute(sessionIdOf(exec), args.id, args.args ?? {}),
   })
 
-  ctx.provide('qq', Object.freeze({ getHealth: () => core.health() }))
+  ctx.provide('qq', Object.freeze({
+    getHealth: () => core.health(),
+    // In-process Host contract for cooperating plugins. The Session ID must
+    // come from the active DSH Agent, never from model or HTTP arguments.
+    resolveTrustedSessionScene: sessionId => core.trustedSceneForSession(sessionId),
+  }))
   ctx.effect(() => () => core.close())
   void core.resumePending().catch(() => {})
   void transport.start(event => core.ingest(event)).catch(() => {})

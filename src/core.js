@@ -288,6 +288,17 @@ export class QQCore {
     return { botId: row.botId, kind: row.kind, peerId: row.peerId }
   }
 
+  trustedSceneForSession(sessionId) {
+    const row = this.#requireAuthorizedSession(sessionId)
+    return Object.freeze({
+      platform: 'qq',
+      kind: row.kind,
+      id: `${row.botId}:${row.peerId}`,
+      verified: true,
+      admin: row.kind === 'private' && this.permissions.ownerPrivateIds.has(row.peerId),
+    })
+  }
+
   close() {
     this.closed = true
     for (const waiter of this.waiters.values()) waiter.resolve()
