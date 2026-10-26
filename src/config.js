@@ -17,4 +17,15 @@ export const Config = z.object({
     privateIds: z.array(z.string()).default([]),
     triggerNames: z.array(z.string()).default([]),
   }).default({}),
+  permissions: z.object({
+    defaultMode: z.string().default('safe-chat'),
+    groupDefaultMode: z.string().default('safe-chat'),
+    privateDefaultMode: z.string().default('safe-chat'),
+    ownerPrivateIds: z.array(z.string()).default([]),
+    ownerTools: z.array(z.string()).default([]),
+    globalDeny: z.array(z.string()).default([]),
+    accountGrants: z.object({
+      byBotId: z.dict(z.object({ qzonePublish: z.boolean().default(false) })).default({}),
+    }).default({}),
+  }).default({}),
 })

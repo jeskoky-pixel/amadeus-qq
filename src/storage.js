@@ -42,7 +42,7 @@ export function sceneKey(raw) {
 }
 
 function emptyState() {
-  return { schemaVersion: SCHEMA_VERSION, scenes: {} }
+  return { schemaVersion: SCHEMA_VERSION, scenes: {}, retiredSessions: [] }
 }
 
 function clone(value) {
@@ -63,6 +63,11 @@ function validateState(state) {
     throw new Error('QQ state schema is invalid; refusing to reset durable state')
   }
   const boundSessions = new Set()
+  if (!Array.isArray(state.retiredSessions)) throw new Error('QQ state has an invalid retired Session index')
+  for (const sessionId of state.retiredSessions) {
+    if (typeof sessionId !== 'string' || !sessionId || boundSessions.has(sessionId)) throw new Error('QQ state has an invalid retired Session')
+    boundSessions.add(sessionId)
+  }
   for (const [key, row] of Object.entries(state.scenes)) {
     if (sceneKey(row) !== key || !Array.isArray(row.messages) || !Array.isArray(row.seenIds) || !Array.isArray(row.deliveries)) {
       throw new Error(`QQ state contains an invalid scene row: ${key}`)
@@ -103,6 +108,10 @@ function validateState(state) {
     if (row.sessionId !== null && (typeof row.sessionId !== 'string' || !row.sessionId)) {
       throw new Error(`QQ state contains an invalid Session: ${key}`)
     }
+    if (row.boundPermissionRevision !== undefined &&
+      (!Number.isSafeInteger(row.boundPermissionRevision) || row.boundPermissionRevision < 0)) {
+      throw new Error(`QQ state contains an invalid bound permission revision: ${key}`)
+    }
     if (row.sessionId) {
       if (boundSessions.has(row.sessionId)) throw new Error('QQ state binds one DSH Session to multiple scenes')
       boundSessions.add(row.sessionId)
@@ -119,6 +128,7 @@ function normalizeLoadedState(state) {
   if (!state || typeof state !== 'object' || !state.scenes || typeof state.scenes !== 'object' || Array.isArray(state.scenes)) {
     return state
   }
+  state.retiredSessions ??= []
   for (const row of Object.values(state.scenes)) {
     if (!row || typeof row !== 'object' || Array.isArray(row)) continue
     row.deliveryArchive ??= []
@@ -186,7 +196,7 @@ export class QQStore {
   #row(state, identity) {
     const scene = sceneIdentity(identity)
     const key = sceneKey(scene)
-    state.scenes[key] ??= { ...scene, sessionId: null, authEpoch: 0, nextSeq: 1, readSeq: 0, presentedSeq: 0, promptedSeq: 0, messages: [], seenIds: [], deliveries: [], deliveryArchive: [] }
+    state.scenes[key] ??= { ...scene, sessionId: null, authEpoch: 0, boundPermissionRevision: 0, nextSeq: 1, readSeq: 0, presentedSeq: 0, promptedSeq: 0, messages: [], seenIds: [], deliveries: [], deliveryArchive: [] }
     return state.scenes[key]
   }
 
@@ -217,17 +227,45 @@ export class QQStore {
     return matches.length ? clone(matches[0]) : null
   }
 
+  isKnownSession(sessionId) {
+    if (typeof sessionId !== 'string' || !sessionId) return false
+    return this.state.retiredSessions.includes(sessionId) || this.sceneForSession(sessionId) !== null
+  }
+
+  retireSession(identity, sessionId) {
+    if (typeof sessionId !== 'string' || !sessionId) throw new TypeError('invalid DSH Session ID')
+    return this.#change(state => {
+      const row = this.#row(state, identity)
+      if (row.sessionId !== sessionId) throw new Error('QQ_SESSION_CHANGED: expected Session is no longer bound')
+      if (!state.retiredSessions.includes(sessionId)) state.retiredSessions.push(sessionId)
+      row.sessionId = null
+      row.boundPermissionRevision = 0
+      return clone(row)
+    })
+  }
+
+  recordRetiredSession(sessionId) {
+    if (typeof sessionId !== 'string' || !sessionId) throw new TypeError('invalid DSH Session ID')
+    return this.#change(state => {
+      if (Object.values(state.scenes).some(row => row.sessionId === sessionId)) throw new Error('cannot retire an active QQ Session')
+      if (!state.retiredSessions.includes(sessionId)) state.retiredSessions.push(sessionId)
+      return sessionId
+    })
+  }
+
   bindSession(identity, sessionId, authEpoch = 0) {
     if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 200) throw new TypeError('invalid DSH Session ID')
     if (!Number.isSafeInteger(authEpoch) || authEpoch < 0) throw new TypeError('invalid authorization epoch')
     return this.#change(state => {
       const row = this.#row(state, identity)
+      if (state.retiredSessions.includes(sessionId)) throw new Error('retired DSH Session cannot be rebound')
       if (row.sessionId && row.sessionId !== sessionId) throw new Error('scene already has a DSH Session')
       if (Object.values(state.scenes).some(other => other !== row && other.sessionId === sessionId)) {
         throw new Error('DSH Session is already bound to another scene')
       }
       row.sessionId = sessionId
       row.authEpoch = authEpoch
+      row.boundPermissionRevision = row.permissions?.revision ?? 0
       return clone(row)
     })
   }

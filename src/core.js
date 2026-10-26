@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { normalizeId, normalizeMessageId, sceneIdentity, sceneKey } from './storage.js'
 import { normalizeOneBotMessage, validateOutgoingSegments } from './onebot.js'
+import { PermissionEngine } from './permissions.js'
 
 const DEFAULT_WAIT_MS = 30_000
 const MAX_WAIT_MS = 300_000
@@ -28,12 +29,13 @@ function messageText(message) {
 }
 
 export class QQCore {
-  constructor({ store, dsh, transport, policy = {}, clock = () => Date.now() }) {
+  constructor({ store, dsh, transport, policy = {}, permissionPolicy = {}, clock = () => Date.now() }) {
     if (!store || !dsh || !transport) throw new TypeError('store, dsh and transport are required')
     this.store = store
     this.dsh = dsh
     this.transport = transport
     this.policy = parsePolicy(policy)
+    this.permissions = new PermissionEngine(permissionPolicy)
     this.clock = clock
     this.sceneChains = new Map()
     this.waiters = new Map()
@@ -46,12 +48,22 @@ export class QQCore {
       (scene.kind === 'group' ? this.policy.groupIds.has(scene.peerId) : this.policy.privateIds.has(scene.peerId))
   }
 
-  #requireAuthorizedSession(sessionId) {
+  #permissionRevision(row) { return row.permissions?.revision ?? 0 }
+
+  #can(scene, capability) {
+    return this.permissions.evaluate(scene, this.store.getScenePermissions(scene), capability).allowed
+  }
+
+  #requireAuthorizedSession(sessionId, capability = 'qq.read') {
     if (this.closed) throw new Error('QQ plugin is stopped')
     const row = this.store.sceneForSession(sessionId)
     if (!row || !this.allowed(row) || row.authEpoch !== this.policy.epoch) {
       throw new Error('QQ_UNAUTHORIZED: Session or scene permission is invalid')
     }
+    if ((row.boundPermissionRevision ?? 0) !== this.#permissionRevision(row)) {
+      throw new Error('QQ_PERMISSION_CHANGED: old Session must be rebuilt after a Scene permission change')
+    }
+    if (!this.#can(row, capability)) throw new Error(`QQ_PERMISSION_DENIED: ${capability}`)
     return row
   }
 
@@ -64,7 +76,17 @@ export class QQCore {
     return task
   }
 
+  #releaseWaiter(scene, sessionId = null) {
+    const key = sceneKey(scene)
+    const waiter = this.waiters.get(key)
+    if (waiter && (sessionId === null || waiter.sessionId === sessionId)) {
+      this.waiters.delete(key)
+      waiter.resolve()
+    }
+  }
+
   #shouldPrompt(scene, message, row) {
+    if (!this.#can(scene, 'qq.send')) return false
     if (scene.kind === 'private') return true
     if (message.atIds.includes(scene.botId)) return true
     if (message.replyToMessageId && this.store.hasDelivered(row, message.replyToMessageId)) return true
@@ -72,15 +94,49 @@ export class QQCore {
     return this.policy.triggerNames.some(name => text.includes(name))
   }
 
+  async setScenePermissions(rawScene, access) {
+    const scene = sceneIdentity(rawScene)
+    if (!this.allowed(scene)) throw new Error('QQ_UNAUTHORIZED: Scene is outside the configured allowlist')
+    return this.#serial(scene, async () => {
+      const permissions = this.store.setScenePermissions(scene, access)
+      const row = this.store.getScene(scene)
+      if (row.sessionId) {
+        if (typeof this.dsh.cancelSceneSession !== 'function') throw new Error('QQ_SESSION_CANCEL_UNAVAILABLE')
+        const cancelled = await this.dsh.cancelSceneSession(row.sessionId)
+        if (cancelled?.accepted !== true) throw new Error('QQ_SESSION_CANCEL_FAILED')
+        this.#releaseWaiter(scene, row.sessionId)
+        this.store.retireSession(scene, row.sessionId)
+      }
+      return permissions
+    })
+  }
+
   async #ensureSession(scene) {
     let row = this.store.getScene(scene)
     if (row?.sessionId) {
-      if (row.authEpoch !== this.policy.epoch) throw new Error('QQ_AUTH_CHANGED: old Session cannot continue after permission change')
-      return row.sessionId
+      if (row.authEpoch !== this.policy.epoch ||
+        (row.boundPermissionRevision ?? 0) !== this.#permissionRevision(row)) {
+        if (typeof this.dsh.cancelSceneSession !== 'function') throw new Error('QQ_SESSION_CANCEL_UNAVAILABLE')
+        const cancelled = await this.dsh.cancelSceneSession(row.sessionId)
+        if (cancelled?.accepted !== true) throw new Error('QQ_SESSION_CANCEL_FAILED')
+        this.#releaseWaiter(scene, row.sessionId)
+        this.store.retireSession(scene, row.sessionId)
+        row = this.store.getScene(scene)
+      } else {
+        return row.sessionId
+      }
     }
+    if (!this.#can(scene, 'qq.send')) throw new Error('QQ_PERMISSION_DENIED: qq.send')
+    const revision = this.#permissionRevision(row ?? {})
     const created = await this.dsh.createSceneSession(scene)
     const sessionId = typeof created === 'string' ? created : created?.sessionId
     if (!sessionId) throw new Error('DSH did not return a Session ID')
+    row = this.store.getScene(scene)
+    if (this.#permissionRevision(row ?? {}) !== revision || !this.#can(scene, 'qq.send') || !this.allowed(scene)) {
+      this.store.recordRetiredSession(sessionId)
+      await this.dsh.cancelSceneSession?.(sessionId)
+      throw new Error('QQ_PERMISSION_CHANGED: Scene changed during Session creation')
+    }
     row = this.store.bindSession(scene, sessionId, this.policy.epoch)
     return row.sessionId
   }
@@ -102,6 +158,7 @@ export class QQCore {
       mode: 'queue',
       content: [{ type: 'text', text: JSON.stringify(prompt) }],
     })
+    this.#requireAuthorizedSession(sessionId, 'qq.send')
     this.store.markPrompted(scene, seq)
     return sessionId
   }
@@ -115,8 +172,13 @@ export class QQCore {
     return this.#serial(scene, async () => {
       const before = this.store.getScene(scene)
       const key = sceneKey(scene)
-      const waiter = this.waiters.get(key)
-      const needsPrompt = Boolean(waiter) || this.#shouldPrompt(scene, message, before)
+      let waiter = this.waiters.get(key)
+      if (waiter && (waiter.sessionId !== before?.sessionId ||
+        (before.boundPermissionRevision ?? 0) !== this.#permissionRevision(before))) {
+        this.#releaseWaiter(scene, waiter.sessionId)
+        waiter = null
+      }
+      const needsPrompt = this.#can(scene, 'qq.send') && (Boolean(waiter) || this.#shouldPrompt(scene, message, before))
       const inserted = this.store.appendMessage(scene, { ...message, needsPrompt })
       if (inserted.duplicate) return { status: 'duplicate' }
       if (inserted.dropped) return { status: 'dropped', reason: inserted.dropped }
@@ -134,7 +196,7 @@ export class QQCore {
   async resumePending() {
     const results = []
     for (const row of Object.values(this.store.snapshot().scenes)) {
-      if (!this.allowed(row) || row.authEpoch !== this.policy.epoch) continue
+      if (!this.allowed(row) || !this.#can(row, 'qq.send')) continue
       for (const message of row.messages) {
         if (!message.needsPrompt || message.prompted === true) continue
         results.push(await this.#serial(row, () => this.#promptMessage(row, message.seq)))
@@ -164,10 +226,12 @@ export class QQCore {
     if (immediate.messages.length) return { ...immediate, arrived: true, timeout: false }
     const key = sceneKey(row)
     if (this.waiters.has(key)) throw new Error('QQ_WAIT_BUSY: one wait is already active in this scene')
+    let waiter
     await new Promise(resolve => {
       const timer = setTimeout(resolve, timeoutMs)
-      this.waiters.set(key, { afterSeq, resolve: () => { clearTimeout(timer); resolve() } })
-    }).finally(() => { this.waiters.delete(key) })
+      waiter = { sessionId, afterSeq, resolve: () => { clearTimeout(timer); resolve() } }
+      this.waiters.set(key, waiter)
+    }).finally(() => { if (this.waiters.get(key) === waiter) this.waiters.delete(key) })
     this.#requireAuthorizedSession(sessionId)
     const result = this.read(sessionId, { afterSeq })
     // An event handed to a live wait is already in this DSH activity. Leave
@@ -180,7 +244,7 @@ export class QQCore {
   }
 
   async send(sessionId, args) {
-    const row = this.#requireAuthorizedSession(sessionId)
+    const row = this.#requireAuthorizedSession(sessionId, 'qq.send')
     if (!args || typeof args !== 'object' || Array.isArray(args)) throw new TypeError('send arguments must be an object')
     const { actionId } = args
     const segments = validateOutgoingSegments(args.segments)

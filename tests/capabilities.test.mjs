@@ -66,3 +66,13 @@ test('disconnected provider fails without calling a platform action', async t =>
   assert.equal(calls.length, 0)
   core.close()
 })
+
+test('capability execution checks current Scene read permission before OneBot action', async t => {
+  const { registry, core, calls } = fixture(t)
+  const scene = { botId: '10001', kind: 'group', peerId: '20001' }
+  core.store.setScenePermissions(scene, { mode: 'safe-chat', overrides: { 'qq.read': 'deny' } })
+  core.store.bindSession(scene, 'group-session')
+  await assert.rejects(registry.execute('group-session', 'qq.get_group_info'), /QQ_PERMISSION_DENIED/)
+  assert.equal(calls.length, 0)
+  core.close()
+})

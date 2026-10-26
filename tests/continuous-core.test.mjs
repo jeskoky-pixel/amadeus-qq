@@ -29,9 +29,11 @@ function fixture(t, options = {}) {
     async createSceneSession(scene) {
       const sessionId = `session-${nextSession++}`
       events.push(['create', scene.kind, scene.peerId, sessionId])
+      if (options.create) await options.create(scene, sessionId)
       return { sessionId }
     },
-    async prompt(request) { events.push(['prompt', request.sessionId, request.requestId]); return { accepted: true } },
+    async prompt(request) { events.push(['prompt', request.sessionId, request.requestId]); return options.prompt?.(request) ?? { accepted: true } },
+    async cancelSceneSession(sessionId) { events.push(['cancel', sessionId]); return options.cancel?.(sessionId) ?? { accepted: true } },
   }
   const transport = {
     status: 'mock',
@@ -44,6 +46,7 @@ function fixture(t, options = {}) {
       maxDeliveries: options.maxDeliveries ?? 500,
     }),
     dsh, transport, policy: options.policy ?? policy,
+    permissionPolicy: options.permissionPolicy ?? {},
   })
   return { file, events, dsh, transport, make }
 }
@@ -173,6 +176,124 @@ test('permission version change blocks old Session tools even when the scene rem
   assert.throws(() => changed.read(sessionId), /UNAUTHORIZED/)
   await assert.rejects(changed.send(sessionId, { actionId: 'a', segments: [{ type: 'text', data: { text: 'blocked' } }] }), /UNAUTHORIZED/)
   changed.close()
+})
+
+test('Scene permission revision revokes a live Session before any new QQ send', async t => {
+  const f = fixture(t)
+  const core = f.make()
+  const { sessionId } = await core.ingest(privateMessage('301'))
+  const scene = { botId, kind: 'private', peerId: '30001' }
+  core.store.setScenePermissions(scene, { mode: 'observe', overrides: {} })
+  const before = f.events.filter(event => event[0] === 'send').length
+  await assert.rejects(core.send(sessionId, {
+    actionId: 'after-revocation', segments: [{ type: 'text', data: { text: 'must not send' } }],
+  }), /QQ_PERMISSION_CHANGED/)
+  assert.equal(f.events.filter(event => event[0] === 'send').length, before)
+  assert.equal((await core.ingest(privateMessage('302'))).status, 'stored')
+  core.close()
+})
+
+test('Observe mode and per-Scene send deny do not wake the model', async t => {
+  const f = fixture(t)
+  const core = f.make()
+  const groupScene = { botId, kind: 'group', peerId: '20001' }
+  core.store.setScenePermissions(groupScene, { mode: 'observe', overrides: {} })
+  assert.equal((await core.ingest(group('401'))).status, 'stored')
+  core.store.setScenePermissions(groupScene, { mode: 'safe-chat', overrides: { 'qq.send': 'deny' } })
+  assert.equal((await core.ingest(group('402'))).status, 'stored')
+  assert.equal(f.events.filter(event => event[0] === 'prompt').length, 0)
+  core.close()
+})
+
+test('a changed Scene cancels its old activity and starts a fresh Session when sending is allowed again', async t => {
+  const f = fixture(t)
+  const core = f.make()
+  const scene = { botId, kind: 'private', peerId: '30001' }
+  const first = await core.ingest(privateMessage('501'))
+  core.store.setScenePermissions(scene, { mode: 'observe', overrides: {} })
+  assert.equal((await core.ingest(privateMessage('502'))).status, 'stored')
+  core.store.setScenePermissions(scene, { mode: 'safe-chat', overrides: {} })
+  const next = await core.ingest(privateMessage('503'))
+  assert.equal(next.status, 'prompted')
+  assert.notEqual(next.sessionId, first.sessionId)
+  assert.deepEqual(f.events.filter(event => event[0] === 'cancel'), [['cancel', first.sessionId]])
+  await assert.rejects(core.send(first.sessionId, {
+    actionId: 'stale-session', segments: [{ type: 'text', data: { text: 'stale' } }],
+  }), /QQ_UNAUTHORIZED|QQ_PERMISSION_CHANGED/)
+  assert.equal(core.store.isKnownSession(first.sessionId), true, 'retired Session remains in the guard index')
+  assert.equal(core.store.isKnownSession(next.sessionId), true)
+  core.close()
+  assert.equal(new QQStore(f.file).isKnownSession(first.sessionId), true, 'retirement survives restart')
+})
+
+test('permission setter revokes immediately, and failed cancellation cannot create a replacement Session', async t => {
+  const f = fixture(t, { cancel: () => ({ accepted: false }) })
+  const core = f.make()
+  const scene = { botId, kind: 'private', peerId: '30001' }
+  const first = await core.ingest(privateMessage('511'))
+  await assert.rejects(core.setScenePermissions(scene, { mode: 'observe', overrides: {} }), /QQ_SESSION_CANCEL_FAILED/)
+  await assert.rejects(core.send(first.sessionId, {
+    actionId: 'after-failed-cancel', segments: [{ type: 'text', data: { text: 'blocked' } }],
+  }), /QQ_PERMISSION_CHANGED/)
+  core.store.setScenePermissions(scene, { mode: 'safe-chat', overrides: {} })
+  await assert.rejects(core.ingest(privateMessage('512')), /QQ_SESSION_CANCEL_FAILED/)
+  assert.equal(f.events.filter(event => event[0] === 'create').length, 1)
+  assert.equal(f.events.filter(event => event[0] === 'send').length, 0)
+  core.close()
+})
+
+test('a permission change during prompt acceptance keeps the message pending for safe replay', async t => {
+  let started
+  let release
+  const entered = new Promise(resolve => { started = resolve })
+  const held = new Promise(resolve => { release = resolve })
+  const f = fixture(t, { prompt: async () => { started(); await held; return { accepted: true } } })
+  const core = f.make()
+  const scene = { botId, kind: 'private', peerId: '30001' }
+  const ingestion = core.ingest(privateMessage('521'))
+  await entered
+  core.store.setScenePermissions(scene, { mode: 'observe', overrides: {} })
+  release()
+  await assert.rejects(ingestion, /QQ_PERMISSION_CHANGED/)
+  const message = core.store.getScene(scene).messages.find(item => item.messageId === '521')
+  assert.equal(message.needsPrompt, true)
+  assert.equal(message.prompted, false)
+  core.close()
+})
+
+test('revoked wait cannot consume the first message for a replacement Session', async t => {
+  const f = fixture(t)
+  const core = f.make()
+  const scene = { botId, kind: 'private', peerId: '30001' }
+  const first = await core.ingest(privateMessage('531'))
+  const waiting = core.wait(first.sessionId, { timeoutMs: 5000 })
+  await core.setScenePermissions(scene, { mode: 'observe', overrides: {} })
+  await assert.rejects(waiting, /QQ_UNAUTHORIZED|QQ_PERMISSION_CHANGED/)
+  await core.setScenePermissions(scene, { mode: 'safe-chat', overrides: {} })
+  const next = await core.ingest(privateMessage('532'))
+  assert.equal(next.status, 'prompted')
+  assert.notEqual(next.sessionId, first.sessionId)
+  assert.equal(core.health().activeWaits, 0)
+  core.close()
+})
+
+test('permission change while creating a Session retires the orphan before it can prompt', async t => {
+  let started
+  let release
+  const entered = new Promise(resolve => { started = resolve })
+  const held = new Promise(resolve => { release = resolve })
+  const f = fixture(t, { create: async () => { started(); await held } })
+  const core = f.make()
+  const scene = { botId, kind: 'private', peerId: '30001' }
+  const ingestion = core.ingest(privateMessage('541'))
+  await entered
+  core.store.setScenePermissions(scene, { mode: 'observe', overrides: {} })
+  release()
+  await assert.rejects(ingestion, /QQ_PERMISSION_CHANGED/)
+  assert.equal(core.store.getScene(scene).sessionId, null)
+  assert.equal(core.store.isKnownSession('session-1'), true)
+  assert.equal(f.events.filter(event => event[0] === 'prompt').length, 0)
+  core.close()
 })
 
 test('reply and mention must resolve inside the bound group scene', async t => {

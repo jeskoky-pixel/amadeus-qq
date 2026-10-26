@@ -56,6 +56,15 @@ function makeDshHost(ctx, config) {
   }
   if (typeof config.sessionCwd !== 'string' || !path.isAbsolute(config.sessionCwd)) throw new Error('QQ sessionCwd must be absolute')
   return {
+    async cancelSceneSession(sessionId) {
+      if (typeof controller.cancel !== 'function') throw new Error('DSH Session cancellation is unavailable')
+      try {
+        return await controller.cancel({ sessionId })
+      } catch (error) {
+        if (error?.code === 'session/not-found') return { accepted: true, alreadyInactive: true }
+        throw error
+      }
+    },
     async createSceneSession() {
       const created = await controller.create({ cwd: config.sessionCwd, agentPreset: config.agentPreset })
       const agent = await controller.resolveAgent(created.sessionId)
@@ -97,14 +106,14 @@ export function apply(ctx, config = {}) {
     wsUrl: config.wsUrl,
     tokenEnv: config.tokenEnv,
   })
-  const core = new QQCore({ store, dsh, transport, policy: config.policy })
+  const core = new QQCore({ store, dsh, transport, policy: config.policy, permissionPolicy: config.permissions })
   const capabilities = new CapabilityRegistry({ core, store, transport })
 
   // The guard is global so it also covers a QQ Session restored by DSH before
   // the plugin can attach a fresh per-Agent tool schema restriction.
   ctx.tools.guard(exec => {
     const sid = exec?.agent?.session?.id
-    if (typeof sid !== 'string' || !store.sceneForSession(sid)) return undefined
+    if (typeof sid !== 'string' || !store.isKnownSession(sid)) return undefined
     return QQ_TOOL_SET.has(exec.name) ? undefined : 'QQ Session cannot use non-QQ tools'
   })
 
