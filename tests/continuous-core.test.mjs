@@ -193,6 +193,27 @@ test('Scene permission revision revokes a live Session before any new QQ send', 
   core.close()
 })
 
+test('revocation during send reservation never reaches OneBot or leaves an unsettled action', async t => {
+  const f = fixture(t)
+  const core = f.make()
+  const scene = { botId, kind: 'private', peerId: '30001' }
+  const { sessionId } = await core.ingest(privateMessage('301'))
+  const reserve = core.store.reserveDelivery.bind(core.store)
+  core.store.reserveDelivery = (...args) => {
+    const result = reserve(...args)
+    core.store.setScenePermissions(scene, { mode: 'observe', overrides: {} })
+    return result
+  }
+
+  await assert.rejects(core.send(sessionId, {
+    actionId: 'revoked-before-send', segments: [{ type: 'text', data: { text: 'must not leave' } }],
+  }), /QQ_PERMISSION_CHANGED|QQ_PERMISSION_DENIED/)
+  assert.equal(f.events.filter(event => event[0] === 'send').length, 0)
+  const delivery = new QQStore(f.file).getScene(scene).deliveries.find(item => item.actionId === 'revoked-before-send')
+  assert.notEqual(delivery?.status, 'reserved', 'revoked action must not remain permanently unsettled')
+  core.close()
+})
+
 test('Observe mode and per-Scene send deny do not wake the model', async t => {
   const f = fixture(t)
   const core = f.make()

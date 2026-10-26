@@ -262,6 +262,17 @@ export class QQCore {
     const fingerprint = createHash('sha256').update(JSON.stringify({ scene: sceneKey(row), segments })).digest('hex')
     const reserved = this.store.reserveDelivery(row, actionId, fingerprint)
     if (!reserved.fresh) return { status: reserved.delivery.status, repeated: true, messageId: reserved.delivery.platformMessageId }
+    // The reservation write and the permission check are not one atomic step.
+    // Re-read the Session binding and qq.send immediately before the external
+    // call; a revoked Scene must not reach OneBot. No request was made here, so
+    // the reservation is settled as a terminal failure instead of lingering as
+    // an unsettled action that would consume outbox capacity forever.
+    try {
+      this.#requireAuthorizedSession(sessionId, 'qq.send')
+    } catch (error) {
+      try { this.store.settleDelivery(row, actionId, 'failed') } catch { /* keep the permission failure */ }
+      throw error
+    }
     try {
       const receipt = await this.transport.send(row, segments)
       const messageId = normalizeMessageId(receipt.messageId)
