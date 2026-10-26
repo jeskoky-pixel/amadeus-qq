@@ -568,3 +568,116 @@ test('prepared media sends and file uploads use the persistent action ledger', a
   }), /PERMISSION|UNAUTHORIZED|CHANGED/)
   restarted.close()
 })
+
+test('group upload verifies a new platform file when NapCat returns no file_id', async t => {
+  const f = fixture(t)
+  const core = f.make()
+  const { sessionId } = await core.ingest(group('903'))
+  const plan = {
+    mode: 'upload', action: 'upload_group_file', fingerprint: 'd'.repeat(64), bytes: 49,
+    params: { group_id: '20001', file: 'C:\\snapshot\\qa.txt', name: 'qa.txt', upload_file: true },
+  }
+  const calls = []
+  f.transport.action = async (name, params) => {
+    calls.push(name)
+    if (name === 'upload_group_file') return {}
+    if (name === 'get_group_root_files') return { files: calls.length === 1 ? [] : [
+      { group_id: 20001, file_id: 'new_file_1', file_name: 'qa.txt', file_size: 49, uploader: 10001 },
+    ] }
+    throw new Error('unexpected platform action')
+  }
+  assert.deepEqual(await core.uploadSceneFile(sessionId, 'group-upload-1', plan),
+    { status: 'delivered', repeated: false, fileId: 'new_file_1' })
+  assert.deepEqual(calls, ['get_group_root_files', 'upload_group_file', 'get_group_root_files'])
+  assert.deepEqual(await core.uploadSceneFile(sessionId, 'group-upload-1', plan),
+    { status: 'delivered', repeated: true, fileId: 'new_file_1' })
+  core.close()
+
+  const ambiguous = fixture(t)
+  const ambiguousCore = ambiguous.make()
+  const { sessionId: ambiguousSession } = await ambiguousCore.ingest(group('904'))
+  ambiguous.transport.action = async name => name === 'upload_group_file' ? {} : { files: [
+    { group_id: 20001, file_id: 'existing_file', file_name: 'qa.txt', file_size: 49, uploader: 10001 },
+  ] }
+  assert.deepEqual(await ambiguousCore.uploadSceneFile(ambiguousSession, 'group-upload-2', plan),
+    { status: 'unknown', repeated: false, fileId: null })
+  ambiguousCore.close()
+})
+
+test('group upload does not guess a file id from failed or ambiguous listings', async t => {
+  for (const [index, [label, listings]] of [
+    ['preflight failed', [new Error('listing unavailable')]],
+    ['after upload failed', [{ files: [] }, new Error('listing unavailable')]],
+    ['rotating ids for an old file', [{ files: [
+      { group_id: 20001, file_id: 'old_id', file_name: 'qa.txt', file_size: 49, uploader: 10001, modify_time: 100 },
+    ] }, { files: [
+      { group_id: 20001, file_id: 'rotated_id', file_name: 'qa.txt', file_size: 49, uploader: 10001, modify_time: 100 },
+    ] }]],
+    ['same second collision', [{ files: [
+      { group_id: 20001, file_id: 'old_id', file_name: 'qa.txt', file_size: 49, uploader: 10001, modify_time: 100 },
+    ] }, { files: [
+      { group_id: 20001, file_id: 'rotated_id', file_name: 'qa.txt', file_size: 49, uploader: 10001, modify_time: 100 },
+      { group_id: 20001, file_id: 'other_id', file_name: 'qa.txt', file_size: 49, uploader: 10001, modify_time: 100 },
+    ] }]],
+    ['two matching new files', [{ files: [] }, { files: ['one', 'two'].map(file_id => ({
+      group_id: 20001, file_id, file_name: 'qa.txt', file_size: 49, uploader: 10001,
+    })) }]],
+  ].entries()) {
+    const f = fixture(t)
+    const core = f.make()
+    const { sessionId } = await core.ingest(group(String(905 + index)))
+    let uploadCount = 0
+    f.transport.action = async name => {
+      if (name === 'upload_group_file') { uploadCount++; return {} }
+      const next = listings.shift()
+      if (next instanceof Error) throw next
+      return next
+    }
+    const plan = { mode: 'upload', action: 'upload_group_file', fingerprint: 'e'.repeat(64), bytes: 49,
+      params: { group_id: '20001', file: 'C:\\snapshot\\qa.txt', name: 'qa.txt', upload_file: true } }
+    assert.equal((await core.uploadSceneFile(sessionId, `upload-${label.replaceAll(' ', '-')}`, plan)).status,
+      'unknown', label)
+    assert.equal(uploadCount, 1, label)
+    core.close()
+  }
+})
+
+test('group upload distinguishes a new same-name file by stable modify time', async t => {
+  const f = fixture(t)
+  const core = f.make()
+  const { sessionId } = await core.ingest(group('909'))
+  let reads = 0
+  const old = { group_id: 20001, file_name: 'qa.txt', file_size: 49, uploader: 10001,
+    modify_time: 100 }
+  f.transport.action = async name => {
+    if (name === 'upload_group_file') return {}
+    reads++
+    return { files: reads === 1 ? [{ ...old, file_id: 'old_id' }] : [
+      { ...old, file_id: 'rotated_old_id' }, { ...old, file_id: 'new_id', modify_time: 101 },
+    ] }
+  }
+  const plan = { mode: 'upload', action: 'upload_group_file', fingerprint: 'f'.repeat(64), bytes: 49,
+    params: { group_id: '20001', file: 'C:\\snapshot\\qa.txt', name: 'qa.txt', upload_file: true } }
+  assert.deepEqual(await core.uploadSceneFile(sessionId, 'upload-new-same-name', plan),
+    { status: 'delivered', repeated: false, fileId: 'new_id' })
+  core.close()
+})
+
+test('group upload rechecks permission after preflight listing', async t => {
+  const f = fixture(t)
+  const core = f.make()
+  const { sessionId } = await core.ingest(group('908'))
+  const calls = []
+  f.transport.action = async name => {
+    calls.push(name)
+    core.store.setScenePermissions({ botId, kind: 'group', peerId: '20001' },
+      { mode: 'observe', overrides: {} })
+    return { files: [] }
+  }
+  const plan = { mode: 'upload', action: 'upload_group_file', fingerprint: 'f'.repeat(64), bytes: 49,
+    params: { group_id: '20001', file: 'C:\\snapshot\\qa.txt', name: 'qa.txt', upload_file: true } }
+  await assert.rejects(core.uploadSceneFile(sessionId, 'upload-revoke', plan),
+    /PERMISSION|UNAUTHORIZED|CHANGED/)
+  assert.deepEqual(calls, ['get_group_root_files'], 'revoked Session must never upload the file')
+  core.close()
+})

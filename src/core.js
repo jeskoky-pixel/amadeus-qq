@@ -174,6 +174,14 @@ export class QQCore {
             sessionActive: Boolean(row.sessionId),
             transport: this.transport.status ?? 'unknown',
           },
+          activity: {
+            observedCount: row.messages.length,
+            // Only stable QQ IDs observed in this authorized Scene. Do not
+            // expose names, bodies, media locators or a platform-wide roster.
+            participantIds: [...new Set(row.messages.slice(-500).reverse()
+              .map(item => item.senderId)
+              .filter(id => typeof id === 'string' && /^[1-9]\d{0,19}$/.test(id)))].slice(0, 20),
+          },
           unresolvedDeliveries: row.deliveries
             .filter(delivery => delivery.status === 'unknown')
             .map(delivery => ({
@@ -495,11 +503,52 @@ export class QQCore {
         try { this.store.settleDelivery(row, actionId, 'failed') } catch { /* keep permission failure */ }
         throw error
       }
+      // NapCat may complete a group upload but return no file_id. Its root
+      // listing also rotates file_id on every read, so compare stable file
+      // metadata and counts rather than treating a new id as a new file.
+      const rootFiles = async () => {
+        try {
+          const result = await this.transport.action('get_group_root_files',
+            { group_id: row.peerId }, 10_000, 2 * 1024 * 1024)
+          return Array.isArray(result?.files) && result.files.length <= 2000 ? result.files : null
+        } catch { return null }
+      }
+      const beforeFiles = row.kind === 'group' ? await rootFiles() : null
+      try {
+        this.#requireAuthorizedSession(sessionId, 'qq.send')
+      } catch (error) {
+        try { this.store.settleDelivery(row, actionId, 'failed') } catch { /* keep permission failure */ }
+        throw error
+      }
       try {
         const result = await this.transport.action(plan.action, plan.params)
-        const fileId = typeof result?.file_id === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(result.file_id)
+        let fileId = typeof result?.file_id === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(result.file_id)
           ? result.file_id
           : null
+        if (fileId === null && beforeFiles !== null && Number.isSafeInteger(plan.bytes) && plan.bytes > 0) {
+          const afterFiles = await rootFiles()
+          if (afterFiles !== null) {
+            const isMatch = file =>
+              typeof file?.file_id === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(file.file_id) &&
+              String(file.group_id) === row.peerId &&
+              file.file_name === plan.params.name && Number(file.file_size ?? file.size) === plan.bytes &&
+              String(file.uploader) === row.botId
+            const beforeMatches = beforeFiles.filter(isMatch)
+            const afterMatches = afterFiles.filter(isMatch)
+            if (afterMatches.length === beforeMatches.length + 1) {
+              // A unique name/size/uploader is sufficient. For an existing
+              // same-name file, require a fresh unique platform modify_time;
+              // same-second or missing timestamps remain unknown.
+              const candidate = beforeMatches.length === 0 ? afterMatches[0] : (() => {
+                const oldTimes = new Set(beforeMatches.map(file => Number(file.modify_time)))
+                const fresh = afterMatches.filter(file => Number.isSafeInteger(Number(file.modify_time)) &&
+                  Number(file.modify_time) > 0 && !oldTimes.has(Number(file.modify_time)))
+                return fresh.length === 1 ? fresh[0] : null
+              })()
+              if (candidate) fileId = candidate.file_id
+            }
+          }
+        }
         if (fileId === null) {
           this.store.settleDelivery(row, actionId, 'unknown')
           return { status: 'unknown', repeated: false, fileId: null }

@@ -69,6 +69,8 @@ test('native QQ management requires a DSH owner admission and same-origin write 
   assert.equal(listed.status, 200)
   assert.ok(Array.isArray(listed.body.data.scenes))
   assert.ok(!JSON.stringify(listed.body).includes('PRIVATE_SCENE_CONTENT'), 'admin listing exposes metadata, not message bodies')
+  assert.deepEqual(listed.body.data.scenes[0].activity,
+    { observedCount: 1, participantIds: ['40001'] })
   const saved = await invoke(owner, 'POST', '/api/amadeus-qq/scenes/permissions', write)
   assert.equal(saved.status, 200)
   assert.equal(store.getScenePermissions(scene).mode, 'observe')

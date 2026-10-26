@@ -1,6 +1,10 @@
 # amadeus-qq 交接
 
-## 最新检查点（2026-10-27，v1.0 定向收尾）
+## 当前检查点（2026-10-27，真实群聊/附件、Web Console 与最终质量门禁）
+
+真实 NapCat/QQ 的授权范围已扩展到仅含 Owner 与测试 Bot 的一个群：隔离官方 DSH 模型实际调用 @+face、回复、回应、戳一戳和群附件发送，均返回 `delivered`；NapCat `get_msg` 复核到 @、face、reply 段，群文件根目录确认一个上传文件。NapCat 会轮换群文件 `file_id`，最终代码改以稳定元数据和文件计数核对，歧义保留 unknown；最终包与隔离 Desktop 重启后的新群附件返回 delivered，平台恰有一个匹配文件并经 `get_group_file_url` 解析回执，列表 ID 与上传时不同。旧 unknown 上传没有被重试或改写。真实浏览器已加载最终包的 Web Console，显示群/私聊/Bot/已观察 QQ ID 场景图，节点点击、筛选和重置可用，owner admission、CSP 与权限编辑器保留；在停用 Memory Bundle 的隔离 Desktop 中同样通过，确认运行时不依赖 Memory。窄屏由横向滚动及更窄时的列表回退处理，未做移动端视觉回归。Memory 同 Host 以合成标记和真实绑定 Session 验证精确查询命中私聊标记、无跨 Scene 注入，但宽泛查询未召回，不能宣称检索完备。Life 受控外发已独立验证：模型工具创建的 intent 持久化 `life-tool:session:<当前 Owner Session>` provenance；管理员对同一 allowlist Owner Session 与授权 QQ 私聊启用 `externalMessageSessionIds` 后，wake 执行，模型恰好一次调用 `qq_send_message`，QQ 返回 delivered，NapCat `get_msg` 与指定 Owner 好友历史确认 Bot 私有文字。首次尝试曾因错误 provenance 检查未发送，Life 源码改为读取持久 intent，而非 wake/binding 授权；关闭 opt-in 后新工具授权 intent 的 wake 使用显式非发送提示，模型零次 QQ 发送。该 opt-in 只改变提示指导，不是 Life 级硬闸门，QQ Scene 执行权限仍是权威；长期自治与任意 QQ 目标未验证。`npm test` 为 264 通过、0 失败、4 跳过（均为 Windows 符号链接不可用），构建、打包与 `git diff --check` 通过。完整证据见[最终验收记录](docs/verification/V1_REAL_NAPCAT_2026-10-27.md)与[收缩版范围](docs/V1_SCOPE.md)。PR #1 保持 Draft；生产前先备份独立状态、小范围灰度，unknown 只人工对账，回滚停用 Bundle 并恢复隔离备份。
+
+## 上一检查点（2026-10-27，v1.0 定向收尾）
 
 在原 `codex/m0-baseline` 和 Draft PR #1 上修复 Owner 动态 Host 工具被 QQ Connector 全局 guard 错误拒绝的问题，并补入站 `get_image`/`get_file` 有界响应回归。`npm test` 为 256 通过、0 失败、4 跳过，构建及 `git diff --check` 通过。隔离官方 DSH Desktop 实际调用 `life_intent_create`、`web_fetch`；Life wake 后调用 QQ 当前 Scene 只读工具并留下 `executed` 记录，管理 API 撤权后旧 Owner Session 再调用 `web_fetch` 被拒。QQ+Memory 在同一 Host 中的合成群 A、群 B、私聊上下文互相隔离。QQ/Life Bundle 已停用，隔离 QA Profile 和 QQ 合成状态已恢复，测试 NapCat 保持停止。真实 QQ 的核心收发、头像/签名、QQ 空间证据仍见[最终验收记录](docs/verification/V1_REAL_NAPCAT_2026-10-27.md)；新媒体内联分支仅有模拟证据。未完成的实机边界见[范围清单](docs/V1_SCOPE.md)。PR 继续 Draft，不自动合并或部署。
 
