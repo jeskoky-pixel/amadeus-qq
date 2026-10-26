@@ -18,6 +18,6 @@
 | OneBot 参数及结果 | 本机模拟服务收到标准目录动作；单元回归核对参数固定 `{}`、分页、目标参数拒绝与普通 Scene 拒绝。 |
 | 撤权 | 管理接口将两项权限改为 deny 后，旧 DSH Session 再调用目录能力返回 `QQ_UNAUTHORIZED`，没有目录内容进入模型。 |
 | 重启持久性 | 隔离 Desktop 硬重启后，私聊 Scene revision 7、`safe-chat` 与两项 deny 保持；transport 已恢复 `disabled`。 |
-| GUI 草稿 | 纯函数与生成的客户端包测试通过；本轮未对新增的切换拦截执行真实 GUI 点击验收，不能据此宣称该交互已在 Desktop 通过。既有 GUI 安装、选择、保存、冲突与重启证据见 `GUI_STAGE_2026-10-26.md`。 |
+| GUI 草稿 | 原生 Settings 的 QA.40 页面实际验证：群 Scene 改为未保存的 Observe 后，重选同一 Scene 与点击私聊 Scene 均显示提示且保留草稿、原 revision；取消后可切换到私聊 revision 7。管理 API 复核群 revision 2、私聊 revision 7 均未被改写。保存中的切换拦截仅由客户端单元测试覆盖。既有 GUI 保存、冲突与重启证据见 `GUI_STAGE_2026-10-26.md`。 |
 
 目录响应目前来自合成 OneBot；NapCat 返回字段差异、真实账号目录规模和延迟尚未验证。媒体与通用 Owner 工具仍需独立安全验收。
