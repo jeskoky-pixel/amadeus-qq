@@ -6,6 +6,19 @@ import { test } from 'node:test'
 import { apply } from '../src/index.js'
 import { QQStore } from '../src/storage.js'
 
+test('installed package exports a persistent QQ preset guard', async () => {
+  const module = await import('@amadeus/qq/preset-guard')
+  let guard
+  module.apply({ tools: {
+    guard: fn => { guard = fn },
+    restrict: () => {},
+  } })
+  assert.equal(typeof guard, 'function')
+  assert.match(guard({ name: 'memory_search' }), /non-QQ tools/)
+  assert.match(guard({ name: 'pwsh' }), /non-QQ tools/)
+  assert.equal(guard({ name: 'qq_send_message' }), undefined)
+})
+
 function fakeHost() {
   const tools = new Map()
   const guards = []
