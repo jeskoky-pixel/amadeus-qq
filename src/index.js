@@ -5,6 +5,7 @@ import { OneBotAdapter } from './onebot.js'
 import { acquireInstanceLease } from './lease.js'
 import { CapabilityRegistry } from './capabilities.js'
 import { Config } from './config.js'
+import { apply as applyPresetGuard } from './preset-guard.mjs'
 
 export const name = 'amadeus-qq'
 export const inject = ['tools', 'sessionController']
@@ -74,6 +75,10 @@ function makeDshHost(ctx, config) {
 }
 
 export function apply(ctx, config = {}) {
+  // The preset rows mount this same package root with `presetGuard: true`.
+  // Branch before any connector startup requirement so the guard is owned by
+  // the preset, not by the connector's enabled/statePath configuration.
+  if (config.presetGuard === true) return applyPresetGuard(ctx, { level: 1 })
   if (config.enabled !== true) {
     ctx.provide('qq', Object.freeze({ getHealth: () => ({ enabled: false, status: 'disabled' }) }))
     return

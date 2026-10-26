@@ -19,6 +19,21 @@ test('installed package exports a persistent QQ preset guard', async () => {
   assert.equal(guard({ name: 'qq_send_message' }), undefined)
 })
 
+test('package root branches to the preset guard before connector startup', () => {
+  let guard
+  const ctx = {
+    tools: {
+      guard: fn => { guard = fn },
+      restrict: () => {},
+    },
+  }
+  apply(ctx, { presetGuard: true })
+  assert.equal(typeof guard, 'function')
+  assert.match(guard({ name: 'memory_search' }), /non-QQ tools/)
+  assert.match(guard({ name: 'pwsh' }), /non-QQ tools/)
+  assert.equal(guard({ name: 'qq_send_message' }), undefined)
+})
+
 function fakeHost() {
   const tools = new Map()
   const guards = []

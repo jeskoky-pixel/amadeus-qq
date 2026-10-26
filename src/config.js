@@ -1,6 +1,7 @@
 import z from '@deepseek-ai/schemastery'
 
 export const Config = z.object({
+  presetGuard: z.boolean().default(false),
   enabled: z.boolean().default(false),
   connect: z.boolean().default(false),
   statePath: z.string().default(''),

@@ -2,7 +2,7 @@
 
 通过独立无头 NapCat 接入 QQ，维护持续收发、工具操作、等待续接、媒体、路由、去重和回执。
 
-**当前状态：M1 隔离开发候选。**已有独立 DSH 插件包、持续 Session 核心和模拟 OneBot 回放。独立受限 Agent preset 尚未通过真实 DSH 装载验收，当前包不会自动注册该 preset。尚未完成独立无头 NapCat、真实 QQ、媒体、QQ 空间、生态联动和原生管理 GUI 验收，不可部署到日常 QQ。
+**当前状态：M1 隔离开发候选。**已有独立 DSH 插件包、持续 Session 核心和模拟 OneBot 回放。包内随附独立的受限 Agent preset（仅 QQ 工具边界，不含人格）。隔离 DSH 重启后 preset registry 不再 broken，真实 Session request/header 为 8 个 QQ 工具、0 个非 QQ 工具；停用 QQ 包后旧 Session 未获得非 QQ 工具，重启后因 preset 缺失而拒绝恢复。强制非 QQ 工具调用和跨场景 Memory 隐私仍未完成真实验收；尚未完成独立无头 NapCat、真实 QQ、媒体、QQ 空间、生态联动和原生管理 GUI 验收，不可部署到日常 QQ。
 
 项目入口：[Amadeus-dsh](https://github.com/jeskoky-pixel/Amadeus-dsh)。开发顺序：P0。当前仓库已于 2026-10-25 根据用户要求公开，便于网页端审阅。
 
@@ -26,7 +26,7 @@ QQ 交互以现用 bridge 的黑盒体验为基准，允许修改或重写。仅
 
 需求与验收关注：R-01、R-02、R-03、R-04、R-05、R-13、R-15；重点验收 A-02—A-06、A-12、A-15。
 
-下一步：解决受限 QQ preset 的真实 DSH 装载问题并验证停用后的工具边界，补齐独立无头 NapCat 和 M2–M5 能力，再做获授权的实机验收。
+下一步：在真实 DSH 中验证强制非 QQ 调用拒绝与可信 Scene/Memory 边界，补齐独立无头 NapCat 和 M2–M5 能力，再做获授权的实机验收。
 
 ## 发布与隐私
 

@@ -1,0 +1,20 @@
+# Dedicated DSH Agent preset shipped by the same @amadeus/qq package.
+# It declares only the QQ platform operation contract (tool boundary) and no
+# persona or character card. The guard lives with the preset, so a persisted QQ
+# Session keeps its tool boundary even when the connector is disabled or absent.
+- insert:
+    - id: preset-amadeus-qq
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: amadeus-qq
+        name: Amadeus QQ
+        description: Restricted continuous QQ conversation Session
+        order: 20
+        plugins:
+          - id: qq-tool-boundary
+            # Mount the package root here. DSH's preset registry resolves the
+            # package root reliably; a package subpath export imports under
+            # plain Node but leaves this row "never started" in the registry.
+            name: '@amadeus/qq'
+            config:
+              presetGuard: true
