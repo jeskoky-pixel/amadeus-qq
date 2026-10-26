@@ -356,6 +356,7 @@ export function apply(ctx, config = {}) {
             speechToText,
             mediaRoot: config.mediaRoot,
             providerId: asrProviderId,
+            ffmpegPath: config.ffmpegPath,
             sessionId: sessionIdOf(exec),
             messageId: args.messageId,
             index: args.index ?? 0,

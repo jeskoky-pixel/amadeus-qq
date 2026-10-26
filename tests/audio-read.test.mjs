@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { spawnSync } from 'node:child_process'
 import { test } from 'node:test'
 import { QQStore } from '../src/storage.js'
 import { QQCore } from '../src/core.js'
@@ -22,6 +23,13 @@ function wav() {
   bytes.write('data', 36)
   bytes.writeUInt32LE(3200, 40)
   return bytes
+}
+
+function installedFfmpeg() {
+  const command = process.platform === 'win32' ? 'where.exe' : 'which'
+  const result = spawnSync(command, ['ffmpeg'], { encoding: 'utf8', timeout: 3000 })
+  const first = result.status === 0 ? result.stdout.split(/\r?\n/).find(Boolean) : null
+  return first && path.isAbsolute(first) ? first : null
 }
 
 function fixture(t) {
@@ -78,6 +86,33 @@ test('record transcription accepts bounded canonical WAV bytes returned inline b
   transport.action = async () => ({ base64: wav().toString('base64'), url: 'https://must-not-fetch.invalid/record' })
   assert.deepEqual(await read(), { text: 'synthetic transcript' })
   assert.deepEqual(Buffer.from(asrCalls[0].spec.audio), wav())
+})
+
+test('record transcription converts a bounded MP3 only with an explicitly configured local ffmpeg', async t => {
+  const ffmpegPath = installedFfmpeg()
+  if (!ffmpegPath) return t.skip('ffmpeg is unavailable on this test host')
+  const { read, transport, asrCalls } = fixture(t)
+  const mp3 = fs.readFileSync(new URL('./fixtures/synthetic-tone.mp3', import.meta.url))
+  transport.action = async () => ({ base64: mp3.toString('base64') })
+  const result = await read({ ffmpegPath })
+  assert.deepEqual(result, { text: 'synthetic transcript' })
+  const audio = Buffer.from(asrCalls[0].spec.audio)
+  assert.equal(audio.toString('ascii', 0, 4), 'RIFF')
+  assert.equal(audio.readUInt32LE(24), 16000)
+  assert.equal(audio.readUInt16LE(22), 1)
+  assert.equal(audio.readUInt16LE(34), 16)
+  assert.ok(audio.length <= 4 * 1024 * 1024)
+  assert.equal(JSON.stringify(result).includes(ffmpegPath), false)
+})
+
+test('MP3 without a valid explicit transcoder never reaches ASR', async t => {
+  const { read, transport, asrCalls, mediaRoot } = fixture(t)
+  const mp3 = fs.readFileSync(new URL('./fixtures/synthetic-tone.mp3', import.meta.url))
+  transport.action = async () => ({ base64: mp3.toString('base64') })
+  for (const ffmpegPath of ['', 'ffmpeg', path.join(mediaRoot, 'missing-ffmpeg.exe')]) {
+    await assert.rejects(read({ ffmpegPath }), /QQ_MEDIA_TRANSCODER_UNAVAILABLE/)
+  }
+  assert.equal(asrCalls.length, 0)
 })
 
 test('record transcription rejects malformed or oversized inline bytes before ASR', async t => {

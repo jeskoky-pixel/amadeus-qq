@@ -154,6 +154,23 @@ function parsePermissionRequest(body) {
   return { scene, access, expectedRevision: body.expectedRevision }
 }
 
+/** @param {Record<string, unknown>} body */
+function parseResolutionRequest(body) {
+  exactKeys(body, ['scene', 'actionId', 'outcome'], 'request')
+  exactKeys(body.scene, ['botId', 'kind', 'peerId'], 'scene')
+  let scene
+  try {
+    scene = sceneIdentity(body.scene)
+  } catch {
+    throw new RequestError(400, 'scene is not a valid QQ Scene identity')
+  }
+  if (typeof body.actionId !== 'string' || !/^[\w-]{1,100}$/.test(body.actionId)) {
+    throw new RequestError(400, 'actionId is invalid')
+  }
+  if (body.outcome !== 'failed') throw new RequestError(400, 'outcome must be failed')
+  return { scene, actionId: body.actionId, outcome: body.outcome }
+}
+
 /** @param {import('node:http').ServerResponse} res @param {unknown} error */
 function sendFailure(res, error) {
   if (error?.code === 'QQ_PERMISSION_CONFLICT') {
@@ -166,6 +183,18 @@ function sendFailure(res, error) {
   }
   if (error?.code === 'QQ_OWNER_AGENT_FORBIDDEN') {
     return fail(res, 403, 'QQ_OWNER_AGENT_FORBIDDEN', 'owner-agent is limited to a configured owner private Scene')
+  }
+  if (error?.code === 'QQ_DELIVERY_IN_FLIGHT') {
+    return fail(res, 409, 'QQ_DELIVERY_IN_FLIGHT', 'an in-flight send cannot be reconciled as failed')
+  }
+  if (error?.code === 'QQ_DELIVERY_NOT_UNKNOWN') {
+    return fail(res, 409, 'QQ_DELIVERY_NOT_UNKNOWN', 'only a settled unknown delivery can be reconciled as failed')
+  }
+  if (error?.code === 'QQ_DELIVERY_NOT_FOUND') {
+    return fail(res, 404, 'QQ_DELIVERY_NOT_FOUND', 'unknown delivery not found')
+  }
+  if (error?.code === 'QQ_SCENE_UNAUTHORIZED') {
+    return fail(res, 403, 'QQ_SCENE_UNAUTHORIZED', 'Scene is outside the configured allowlist')
   }
   if (error instanceof RequestError) return fail(res, error.status, 'QQ_REQUEST_INVALID', error.message)
   if (error instanceof TypeError) return fail(res, 400, 'QQ_REQUEST_INVALID', 'invalid Scene or permission request')
@@ -217,7 +246,7 @@ export function createAdminHandler(core, connection) {
       }
     }
     if (req.method !== 'POST') return fail(res, 405, 'QQ_METHOD_NOT_ALLOWED', 'method not allowed')
-    if (path !== '/scenes/permissions') {
+    if (path !== '/scenes/permissions' && path !== '/deliveries/resolve') {
       return fail(res, 404, 'QQ_ENDPOINT_UNKNOWN', 'unknown QQ management endpoint')
     }
     let body
@@ -225,6 +254,23 @@ export function createAdminHandler(core, connection) {
       body = await readBody(req)
     } catch (error) {
       return sendFailure(res, error)
+    }
+    if (path === '/deliveries/resolve') {
+      let resolution
+      try {
+        resolution = parseResolutionRequest(body)
+      } catch (error) {
+        return sendFailure(res, error)
+      }
+      try {
+        if (typeof core.resolveDelivery !== 'function') {
+          return fail(res, 503, 'QQ_MANAGEMENT_UNAVAILABLE', 'QQ delivery reconciliation is unavailable')
+        }
+        await core.resolveDelivery(resolution.scene, resolution.actionId, resolution.outcome)
+        return send(res, 200, { ok: true, data: { status: 'failed' } })
+      } catch (error) {
+        return sendFailure(res, error)
+      }
     }
     let parsed
     try {

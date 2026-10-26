@@ -48,6 +48,8 @@ const CSS = `
 [data-amadeus-qq] .muted{opacity:.72}
 [data-amadeus-qq] select{font:inherit;border:1px solid var(--dsw-alias-border-secondary,#8c8c8c55);border-radius:8px;padding:5px 8px;background:var(--dsw-alias-bg-layer-1,#fff);color:inherit;max-width:100%}
 [data-amadeus-qq] select:disabled{opacity:.5}
+[data-amadeus-qq] input{font:inherit;border:1px solid var(--dsw-alias-border-secondary,#8c8c8c55);border-radius:8px;padding:5px 8px;background:var(--dsw-alias-bg-layer-1,#fff);color:inherit;max-width:100%;min-width:200px}
+[data-amadeus-qq] input:disabled{opacity:.5}
 [data-amadeus-qq] .editorRow{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:8px 0;border-top:1px dashed var(--dsw-alias-border-secondary,#8c8c8c33)}
 [data-amadeus-qq] .editorRow:first-of-type{border-top:0}
 [data-amadeus-qq] .editorMain{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -71,6 +73,16 @@ function capabilityLabel(id) {
   return CAPABILITY_LABELS[id] || id
 }
 
+function formatDeliveryTime(value) {
+  const ms = Number(value)
+  if (!Number.isFinite(ms) || ms <= 0) return '时间未知'
+  try {
+    return new Date(ms).toLocaleString('zh-CN', { hour12: false })
+  } catch {
+    return '时间未知'
+  }
+}
+
 function Panel() {
   const [data, setData] = React.useState(null)
   const [loading, setLoading] = React.useState(true)
@@ -82,6 +94,8 @@ function Panel() {
   const [conflict, setConflict] = React.useState(false)
   const [notice, setNotice] = React.useState('')
   const [selectionHint, setSelectionHint] = React.useState('')
+  const [deliveryInputs, setDeliveryInputs] = React.useState({})
+  const [resolvingId, setResolvingId] = React.useState('')
   const loadSeq = React.useRef(0)
   const draftRef = React.useRef(null)
   const selectedKeyRef = React.useRef('')
@@ -141,6 +155,7 @@ function Panel() {
   const selected = scenes.find(item => item.key === selectedKey) || null
   const dirty = selected && draft ? isDraftDirty(selected, draft) : false
   const validation = selected && draft ? validateDraft(selected, draft) : '未选择场景'
+  const unresolved = Array.isArray(selected?.unresolvedDeliveries) ? selected.unresolvedDeliveries : []
   const modes = Array.isArray(data?.modes) && data.modes.length > 0 ? data.modes : MODE_IDS
   const disabled = busy || readOnly || conflict || !selected || !draft
 
@@ -222,6 +237,31 @@ function Panel() {
       }
     } finally {
       setBusy(false)
+    }
+  }
+
+  const resolveDelivery = async (actionId) => {
+    if (!selected || !draft || busy || readOnly || conflict || resolvingId) return
+    const inputKey = deliveryInputKey(selected, actionId)
+    if ((deliveryInputs[inputKey] ?? '') !== actionId) return
+    setResolvingId(actionId)
+    setError(null)
+    setNotice('')
+    try {
+      await resolveUnknownDelivery(selected, actionId)
+      setDeliveryInputs(previous => {
+        const next = { ...previous }
+        delete next[inputKey]
+        return next
+      })
+      // Non-forced refresh keeps an unsaved permission draft intact.
+      await load()
+      setNotice('已将投递 ' + actionId + ' 标记为 failed')
+    } catch (failure) {
+      setError(failure)
+      if (requiresReadOnly(failure)) setReadOnly(true)
+    } finally {
+      setResolvingId('')
     }
   }
 
@@ -345,7 +385,9 @@ function Panel() {
           draft.mode === 'owner-agent' || draft.mode === 'autonomous-social'
             ? React.createElement('small', { className: 'muted', role: 'note' }, RESERVED_MODE_NOTE)
             : null,
-          ...(selected.capabilities ?? []).map(cap => React.createElement(
+          ...(selected.capabilities ?? []).map(cap => {
+            const hint = capabilityStateHint(cap)
+            return React.createElement(
             'div',
             { className: 'editorRow', key: cap.id },
             React.createElement(
@@ -378,14 +420,61 @@ function Panel() {
                   ? (cap.effective ? '当前允许' : '当前拒绝') + (draft.overrides[cap.id] && draft.overrides[cap.id] !== cap.override ? '（保存后生效）' : '')
                   : '策略占位，尚不可执行',
               ),
+              hint ? React.createElement('small', { className: 'muted' }, hint) : null,
             ),
-          )),
+          )}),
           React.createElement(
             'div',
             { className: 'actions' },
             React.createElement('button', { type: 'button', className: 'primary', onClick: save, disabled: disabled || !dirty || Boolean(validation) }, busy ? '保存中…' : '保存'),
             React.createElement('button', { type: 'button', onClick: cancel, disabled: busy || (!dirty && !conflict) }, '取消修改'),
           ),
+          unresolved.length > 0
+            ? React.createElement(
+                'div',
+                null,
+                React.createElement('h3', null, '待人工对账的投递'),
+                React.createElement('small', null, '以下 actionId 的发送结果未知（unknown）；本页不会自动重发。'),
+                React.createElement('div', { className: 'message error', role: 'alert' },
+                  '只有已在 QQ 平台确认未送达，才可标记失败；若实际已送达，后续手动重发可能重复。'),
+                ...unresolved.map(delivery => {
+                  const inputKey = deliveryInputKey(selected, delivery.actionId)
+                  const typed = deliveryInputs[inputKey] ?? ''
+                  const confirmed = typed === delivery.actionId
+                  const submitting = resolvingId === delivery.actionId
+                  return React.createElement(
+                    'div',
+                    { className: 'editorRow', key: delivery.actionId },
+                    React.createElement(
+                      'div',
+                      { className: 'editorMain' },
+                      React.createElement('strong', null, delivery.actionId),
+                      React.createElement('span', { className: 'chip warn' }, 'unknown'),
+                      React.createElement('small', { className: 'mono' }, formatDeliveryTime(delivery.updatedAt)),
+                    ),
+                    React.createElement(
+                      'div',
+                      { className: 'editorMain' },
+                      React.createElement('input', {
+                        type: 'text',
+                        value: typed,
+                        disabled: disabled || Boolean(resolvingId),
+                        placeholder: '输入完整 actionId',
+                        'aria-label': '确认 actionId ' + delivery.actionId,
+                        autoComplete: 'off',
+                        spellCheck: false,
+                        onChange: (event) => setDeliveryInputs(previous => ({ ...previous, [inputKey]: event.target.value })),
+                      }),
+                      React.createElement('button', {
+                        type: 'button',
+                        onClick: () => { void resolveDelivery(delivery.actionId) },
+                        disabled: disabled || Boolean(resolvingId) || !confirmed,
+                      }, submitting ? '提交中…' : '标记为失败'),
+                    ),
+                  )
+                }),
+              )
+            : null,
         )
       : null,
     React.createElement('small', { className: 'muted' }, '管理接口要求 DSH Owner admission 与同源请求；该页面不自行判断管理员身份。'),

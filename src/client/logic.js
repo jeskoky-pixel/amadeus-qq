@@ -63,6 +63,31 @@ export function validateDraft(entry, draft) {
   return null
 }
 
+const CAPABILITY_REASON_HINTS = Object.freeze({
+  'owner-directory-required': '需在可信 Owner 私聊使用 Owner Agent 模式，并对该能力显式 allow。',
+  'global-deny': '宿主全局策略拒绝该能力，Scene 设置无法解除。',
+  'account-publish-required': '该 QQ 账号未获授权使用 QQ 空间发布。',
+  'scene-deny': '该 Scene 显式拒绝（deny）此能力。',
+  'owner-private-required': '仅可信 Owner 私聊的 Owner Agent 模式可用。',
+  'owner-tool-required': '宿主未为该 Owner 场景配置此工具。',
+  mode: '当前模式未包含此能力。',
+  'scene-allow': '该 Scene 显式允许，但保存后按最新模式重算。',
+})
+
+/**
+ * Fixed Chinese guidance for an implemented-but-denied capability. Uses only
+ * known denial reasons; an unknown reason falls back to a generic sentence and
+ * never echoes the server value. `Object.hasOwn` keeps names such as
+ * `constructor` or `toString` from resolving to inherited Object members.
+ */
+export function capabilityStateHint(capability) {
+  if (!capability || capability.implemented !== true || capability.effective === true) return null
+  const reason = capability.reason
+  return typeof reason === 'string' && Object.hasOwn(CAPABILITY_REASON_HINTS, reason)
+    ? CAPABILITY_REASON_HINTS[reason]
+    : '当前策略拒绝该能力。'
+}
+
 export function buildSaveRequest(entry, draft) {
   const overrides = {}
   for (const [id, value] of Object.entries(draft.overrides ?? {})) {
@@ -124,7 +149,7 @@ export function requiresReadOnly(error) {
 /** Fixed Chinese guidance per management failure code; never echoes server internals. */
 export function managementErrorMessage(error) {
   const code = typeof error?.code === 'string' ? error.code : ''
-  if (code === 'QQ_PERMISSION_CONFLICT' || error?.status === 409) {
+  if (code === 'QQ_PERMISSION_CONFLICT') {
     return '权限已被其他窗口修改（409）；请重新加载后再编辑。'
   }
   if (code === 'QQ_AUTH_REQUIRED') {
@@ -141,6 +166,15 @@ export function managementErrorMessage(error) {
   }
   if (code === 'QQ_SESSION_CANCEL_FAILED' || code === 'QQ_SESSION_CANCEL_UNAVAILABLE') {
     return '权限可能已写入，但旧 QQ Session 未能安全取消；请刷新确认最新 revision 后再编辑。'
+  }
+  if (code === 'QQ_DELIVERY_IN_FLIGHT') {
+    return '该投递仍在进行中，现在不能标记为失败；请稍后刷新重试。'
+  }
+  if (code === 'QQ_DELIVERY_NOT_UNKNOWN') {
+    return '该投递已不是 unknown 状态；请刷新确认后再操作。'
+  }
+  if (code === 'QQ_DELIVERY_NOT_FOUND') {
+    return '未找到该 actionId 的未知投递；请刷新后确认。'
   }
   if (code === 'QQ_REQUEST_INVALID') {
     return '管理请求无效；请刷新后重试。'
@@ -169,6 +203,39 @@ export async function savePermissions(entry, draft, fetchImpl = fetch) {
     credentials: 'same-origin',
     headers: { 'content-type': 'application/json', 'x-amadeus-qq': '1' },
     body: JSON.stringify(buildSaveRequest(entry, draft)),
+  })
+  return readPayload(response)
+}
+
+/**
+ * Storage key for one operator confirmation input. It is scoped to the Scene
+ * and prefixed, so two Scenes with the same actionId never share a draft, and
+ * prototype names such as `__proto__` or `constructor` can never be the key.
+ * The API still receives the untouched actionId.
+ */
+export function deliveryInputKey(entry, actionId) {
+  return 'delivery-confirm:' + String(entry?.key ?? '') + '|' + String(actionId)
+}
+
+/**
+ * Manual reconciliation for one unknown delivery. Only the owner management
+ * surface can do this, and the body never carries message content: just the
+ * Scene identity, the operator-confirmed actionId and the fixed outcome.
+ */
+export async function resolveUnknownDelivery(entry, actionId, fetchImpl = fetch) {
+  const response = await fetchImpl(API_ROOT + '/deliveries/resolve', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json', 'x-amadeus-qq': '1' },
+    body: JSON.stringify({
+      scene: {
+        botId: entry.scene.botId,
+        kind: entry.scene.kind,
+        peerId: entry.scene.peerId,
+      },
+      actionId,
+      outcome: 'failed',
+    }),
   })
   return readPayload(response)
 }

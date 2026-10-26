@@ -9,6 +9,7 @@ export const Config = z.object({
   statePath: z.string().default(''),
   mediaRoot: z.string().default(''),
   asrProviderId: z.string().default(''),
+  ffmpegPath: z.string().default(''),
   sessionCwd: z.string().default(''),
   agentPreset: z.string().default(''),
   httpUrl: z.string().default(''),

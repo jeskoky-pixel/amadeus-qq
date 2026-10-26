@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { spawn } from 'node:child_process'
 import { normalizeMessageId } from './storage.js'
 import { sanitizeInboundSegments } from './onebot.js'
 
@@ -7,10 +8,17 @@ const MAX_AUDIO_BYTES = 4 * 1024 * 1024
 const MAX_RESPONSE_BYTES = 6 * 1024 * 1024
 const MAX_BASE64_CHARS = Math.ceil(MAX_AUDIO_BYTES / 3) * 4
 const MAX_DURATION_SECONDS = 120
+const MAX_PCM_BYTES = Math.min(MAX_AUDIO_BYTES - 44, MAX_DURATION_SECONDS * 32000)
+const TRANSCODE_TIMEOUT_MS = 10_000
 const READ_TIMEOUT_MS = 5_000
 const PLATFORM_TIMEOUT_MS = 10_000
 const ASR_TIMEOUT_MS = 120_000
 const MAX_TRANSCRIPT_CHARS = 16_384
+const FFMPEG_ARGS = Object.freeze([
+  '-nostdin', '-hide_banner', '-loglevel', 'error',
+  '-f', 'mp3', '-i', 'pipe:0', '-vn', '-ac', '1', '-ar', '16000',
+  '-sample_fmt', 's16', '-f', 's16le', 'pipe:1',
+])
 
 function mediaError(code) {
   const error = new Error(code)
@@ -147,6 +155,105 @@ function decodeInlineWav(value) {
   return data
 }
 
+function isMp3(data) {
+  if (data.length >= 3 && data.toString('ascii', 0, 3) === 'ID3') return true
+  return data.length >= 2 && data[0] === 0xff && (data[1] & 0xe0) === 0xe0
+}
+
+function resolveFfmpeg(value) {
+  if (typeof value !== 'string' || !path.isAbsolute(value)) throw mediaError('QQ_MEDIA_TRANSCODER_UNAVAILABLE')
+  let entry
+  try {
+    entry = fs.lstatSync(value)
+  } catch {
+    throw mediaError('QQ_MEDIA_TRANSCODER_UNAVAILABLE')
+  }
+  if (entry.isSymbolicLink() || !entry.isFile()) throw mediaError('QQ_MEDIA_TRANSCODER_UNAVAILABLE')
+  try {
+    fs.accessSync(value, fs.constants.X_OK)
+  } catch {
+    throw mediaError('QQ_MEDIA_TRANSCODER_UNAVAILABLE')
+  }
+  return value
+}
+
+function buildCanonicalWav(pcm) {
+  if (pcm.length === 0 || pcm.length % 2 !== 0) throw mediaError('QQ_MEDIA_TRANSCODER_EMPTY')
+  if (pcm.length > MAX_PCM_BYTES) throw mediaError('QQ_MEDIA_TOO_LARGE')
+  const header = Buffer.alloc(44)
+  header.write('RIFF', 0)
+  header.writeUInt32LE(36 + pcm.length, 4)
+  header.write('WAVEfmt ', 8)
+  header.writeUInt32LE(16, 16)
+  header.writeUInt16LE(1, 20)
+  header.writeUInt16LE(1, 22)
+  header.writeUInt32LE(16000, 24)
+  header.writeUInt32LE(32000, 28)
+  header.writeUInt16LE(2, 32)
+  header.writeUInt16LE(16, 34)
+  header.write('data', 36)
+  header.writeUInt32LE(pcm.length, 40)
+  return Buffer.concat([header, pcm])
+}
+
+function transcodeMp3ToWav(mp3, ffmpegPath) {
+  const executable = resolveFfmpeg(ffmpegPath)
+  return new Promise((resolve, reject) => {
+    let settled = false
+    let timer
+    const finish = (fn, value) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      fn(value)
+    }
+    let child
+    try {
+      child = spawn(executable, FFMPEG_ARGS, {
+        shell: false,
+        windowsHide: true,
+        stdio: ['pipe', 'pipe', 'ignore'],
+      })
+    } catch {
+      finish(reject, mediaError('QQ_MEDIA_TRANSCODER_UNAVAILABLE'))
+      return
+    }
+    const chunks = []
+    let total = 0
+    timer = setTimeout(() => {
+      try { child.kill('SIGKILL') } catch { /* already gone */ }
+      finish(reject, mediaError('QQ_MEDIA_TRANSCODER_TIMEOUT'))
+    }, TRANSCODE_TIMEOUT_MS)
+    timer.unref?.()
+
+    child.on('error', () => finish(reject, mediaError('QQ_MEDIA_TRANSCODER_UNAVAILABLE')))
+    child.stdout.on('data', chunk => {
+      if (settled) return
+      total += chunk.length
+      if (total > MAX_PCM_BYTES) {
+        try { child.kill('SIGKILL') } catch { /* already gone */ }
+        finish(reject, mediaError('QQ_MEDIA_TOO_LARGE'))
+        return
+      }
+      chunks.push(chunk)
+    })
+    child.on('close', code => {
+      if (settled) return
+      if (code !== 0) {
+        finish(reject, mediaError('QQ_MEDIA_TRANSCODER_FAILED'))
+        return
+      }
+      try {
+        finish(resolve, buildCanonicalWav(Buffer.concat(chunks)))
+      } catch (error) {
+        finish(reject, error)
+      }
+    })
+    child.stdin.on('error', () => {})
+    child.stdin.end(mp3)
+  })
+}
+
 /** Validate the canonical 16 kHz mono PCM16 WAV accepted by the local provider. */
 function validateWav(data) {
   if (data.length < 46 ||
@@ -212,6 +319,7 @@ export async function transcribeMessageRecord({
   speechToText,
   mediaRoot,
   providerId,
+  ffmpegPath = '',
   sessionId,
   messageId,
   index = 0,
@@ -269,6 +377,9 @@ export async function transcribeMessageRecord({
     audio = decodeInlineWav(response.base64)
   } else {
     throw mediaError('QQ_MEDIA_LOCAL_FILE_UNAVAILABLE')
+  }
+  if (isMp3(audio)) {
+    audio = await transcodeMp3ToWav(audio, ffmpegPath)
   }
   validateWav(audio)
 

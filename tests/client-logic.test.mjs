@@ -2,12 +2,15 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   buildSaveRequest,
+  capabilityStateHint,
   draftFromEntry,
+  deliveryInputKey,
   fetchScenes,
   isDraftDirty,
   nextDraftForSelection,
   managementErrorMessage,
   requiresReadOnly,
+  resolveUnknownDelivery,
   savePermissions,
   validateDraft,
 } from '../src/client/logic.js'
@@ -154,4 +157,47 @@ test('management failures preserve codes and distinguish authentication from pol
   assert.equal(requiresReadOnly(await capture(503, 'QQ_MANAGEMENT_UNAVAILABLE')), true)
   assert.equal(requiresReadOnly(await capture(403, 'QQ_NEW_UNRECOGNIZED_FAILURE')), true,
     'an unknown 403 code must not silently leave the editor writable')
+})
+
+test('capability guidance explains effective denials without exposing arbitrary server reason text', () => {
+  const denied = reason => capabilityStateHint({ implemented: true, effective: false, override: 'allow', reason })
+  assert.match(denied('owner-directory-required'), /Owner|可信私聊/)
+  assert.match(denied('global-deny'), /全局|宿主/)
+  assert.match(denied('account-publish-required'), /账号|空间/)
+  assert.match(denied('scene-deny'), /显式|场景/)
+  assert.ok(!denied('UNTRUSTED_SECRET_SENTINEL').includes('UNTRUSTED_SECRET_SENTINEL'))
+  assert.equal(denied('constructor'), '当前策略拒绝该能力。',
+    'object prototype properties are not known reason codes')
+  assert.equal(capabilityStateHint({ implemented: true, effective: true, reason: 'mode' }), null)
+  assert.equal(capabilityStateHint({ implemented: false, effective: false, reason: 'unimplemented' }), null)
+})
+
+test('manual unknown-delivery reconciliation uses the owner management contract and never sends content', async () => {
+  let request
+  const fetchImpl = async (url, init) => {
+    request = { url, init }
+    return { ok: true, status: 200, json: async () => ({ ok: true, data: { status: 'failed' } }) }
+  }
+  const result = await resolveUnknownDelivery(entry(), 'ambiguous-1', fetchImpl)
+  assert.deepEqual(result, { status: 'failed' })
+  assert.equal(request.url, '/api/amadeus-qq/deliveries/resolve')
+  assert.equal(request.init.method, 'POST')
+  assert.equal(request.init.credentials, 'same-origin')
+  assert.equal(request.init.headers['x-amadeus-qq'], '1')
+  assert.deepEqual(JSON.parse(request.init.body), {
+    scene: { botId: '10001', kind: 'group', peerId: '20001' },
+    actionId: 'ambiguous-1', outcome: 'failed',
+  })
+  assert.ok(!request.init.body.includes('same durable message'))
+})
+
+test('manual confirmation is scoped to one Scene and safe for prototype-like action IDs', () => {
+  const first = entry()
+  const second = entry({ key: '10001:group:20002', scene: { botId: '10001', kind: 'group', peerId: '20002' } })
+  assert.notEqual(deliveryInputKey(first, 'ambiguous-1'), deliveryInputKey(second, 'ambiguous-1'))
+  for (const actionId of ['__proto__', 'constructor', 'toString']) {
+    const key = deliveryInputKey(first, actionId)
+    assert.notEqual(key, actionId)
+    assert.equal({}[key], undefined)
+  }
 })

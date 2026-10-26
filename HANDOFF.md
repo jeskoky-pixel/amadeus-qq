@@ -1,5 +1,9 @@
 # amadeus-qq 交接
 
+## 当前开发检查点（2026-10-27，合批开发，Desktop 验收待完成）
+
+继续复用三个隔离官方 DeepSeek Flash Creator 会话，由 Codex 先写失败回归、DSH 按核心/媒体/GUI 文件范围修复、Codex 复审。发送账本增加仅认证 Owner 可用的 unknown 投递人工对账：在途、已送达和非 unknown 状态不能标失败；Settings 必须输入同 Scene 的完整 actionId 才允许操作，且不自动重发。能力拒绝原因已有固定说明。语音读取增加显式 `ffmpegPath` 的本地 MP3→canonical WAV 路径；Codex 在本机真实 ffmpeg 上跑通合成 MP3 单元测试。`npm test` 为 145 通过、0 失败、2 项 Windows 符号链接跳过；构建与 `git diff --check` 通过。当前更改还未进行合批 DSH Desktop 安装、GUI 操作和重启验收；真实独立 NapCat 与 QQ 仍未连接。PR #1 保持 Draft，不可部署。后续应合并更多既定 v1.0 能力后集中做一次隔离 Desktop 验收，避免每个小修反复打包重启。
+
 ## 当前检查点（2026-10-26，QA.49 可靠性与内联语音）
 
 原三个持久官方 DeepSeek Flash Creator 会话继续复用。Codex 的失败回归推动了 `unknown` 投递同内容新 `actionId` 的持久原子拦截、OneBot 有界内联 canonical WAV 读取，以及管理 API/GUI 错误归因；Codex 复审后补修未知 403 的保守只读规则。`npm test` 为 139 通过、0 失败、2 项 Windows 符号链接跳过。QA.49 官方隔离 DSH Desktop 通过真实模型工具调用、本机模拟 OneBot 内联合成 WAV、官方 SenseVoice 转写、撤权拒绝和重启后 Safe Chat 持久性；详见 `docs/verification/QA49_RELIABILITY_INLINE_AUDIO_GUI_2026-10-26.md`。隔离 Profile 已恢复 `connect:false`，语音 Bundle 停用，模拟端口关闭。真实 NapCat、媒体发送、QQ 空间、完整 Owner Agent 与生态联动仍未验收；PR #1 保持 Draft，不可部署。

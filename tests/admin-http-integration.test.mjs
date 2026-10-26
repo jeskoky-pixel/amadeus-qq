@@ -247,6 +247,59 @@ test('PermissionEngine refuses owner-agent as a group default', () => {
   assert.throws(() => new PermissionEngine({ defaultMode: 'owner-agent' }), /owner-agent/)
 })
 
+test('only an authenticated owner can reconcile a settled unknown send without an automatic retry', async t => {
+  const { core, store } = coreFixture(t)
+  store.bindSession(group, 'delivery-session')
+  let rejectFirst
+  let sendCount = 0
+  core.transport.send = async () => {
+    sendCount += 1
+    if (sendCount === 1) return new Promise((_, reject) => { rejectFirst = reject })
+    return { messageId: '88002' }
+  }
+  const segments = [{ type: 'text', data: { text: 'same durable message' } }]
+  const first = core.send('delivery-session', { actionId: 'ambiguous-1', segments })
+  assert.equal(sendCount, 1)
+  const handler = createAdminHandler(core, owner)
+  const resolution = { scene: group, actionId: 'ambiguous-1', outcome: 'failed' }
+
+  const pending = await invoke(handler, 'POST', '/api/amadeus-qq/deliveries/resolve', resolution)
+  assert.equal(pending.status, 409, 'an in-flight send cannot be declared failed')
+  assert.equal(store.getScene(group).deliveries[0].status, 'unknown')
+  rejectFirst(new Error('ambiguous transport failure'))
+  assert.equal((await first).status, 'unknown')
+  await assert.rejects(core.send('delivery-session', { actionId: 'ambiguous-2', segments }), /QQ_DELIVERY_UNRESOLVED/)
+  assert.equal(sendCount, 1)
+
+  const listed = await invoke(handler, 'GET', '/api/amadeus-qq/scenes')
+  assert.equal(listed.status, 200)
+  const unresolved = listed.body.data.scenes[0].unresolvedDeliveries
+  assert.ok(unresolved.some(item => item.actionId === 'ambiguous-1' && item.status === 'unknown'))
+  assert.ok(!JSON.stringify(unresolved).includes('same durable message'))
+  assert.ok(!JSON.stringify(unresolved).includes('fingerprint'))
+
+  const guest = createAdminHandler(core, { admit: () => ({ peer: { principal: { kind: 'guest' } } }) })
+  assert.equal((await invoke(guest, 'POST', '/api/amadeus-qq/deliveries/resolve', resolution)).status, 403)
+  assert.equal((await invoke(handler, 'POST', '/api/amadeus-qq/deliveries/resolve', resolution,
+    { origin: 'https://external.invalid' })).status, 403)
+  assert.equal((await invoke(handler, 'POST', '/api/amadeus-qq/deliveries/resolve',
+    { ...resolution, unexpected: true })).status, 400)
+  assert.equal(store.getScene(group).deliveries[0].status, 'unknown')
+
+  const reconciled = await invoke(handler, 'POST', '/api/amadeus-qq/deliveries/resolve', resolution)
+  assert.equal(reconciled.status, 200)
+  assert.equal(store.getScene(group).deliveries[0].status, 'failed')
+  assert.equal(sendCount, 1, 'manual reconciliation never sends QQ content')
+  assert.equal((await core.send('delivery-session', { actionId: 'confirmed-retry', segments })).status, 'delivered')
+  assert.equal(sendCount, 2)
+
+  const delivered = await invoke(handler, 'POST', '/api/amadeus-qq/deliveries/resolve',
+    { scene: group, actionId: 'confirmed-retry', outcome: 'failed' })
+  assert.equal(delivered.status, 409, 'a delivered action cannot be downgraded')
+  assert.equal(store.getScene(group).deliveries.find(item => item.actionId === 'confirmed-retry').status, 'delivered')
+  assert.equal(new QQStore(store.file).getScene(group).deliveries[0].status, 'failed', 'manual outcome is durable')
+})
+
 function mountWithChild(t, child) {
   const dir = temp(t)
   const routes = []

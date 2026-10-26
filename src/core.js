@@ -42,6 +42,7 @@ export class QQCore {
     this.clock = clock
     this.sceneChains = new Map()
     this.waiters = new Map()
+    this.inFlightDeliveries = new Set()
     this.closed = false
   }
 
@@ -172,8 +173,41 @@ export class QQCore {
             sessionActive: Boolean(row.sessionId),
             transport: this.transport.status ?? 'unknown',
           },
+          unresolvedDeliveries: row.deliveries
+            .filter(delivery => delivery.status === 'unknown')
+            .map(delivery => ({
+              actionId: delivery.actionId,
+              status: delivery.status,
+              updatedAt: delivery.updatedAt,
+            })),
         }
       })
+  }
+
+  /**
+   * Explicit owner reconciliation for one settled unknown send. It only closes
+   * the ledger entry as failed; it never sends content, changes permissions, or
+   * touches an action whose transport call is still in flight.
+   */
+  resolveDelivery(rawScene, actionId, outcome = 'failed') {
+    const scene = sceneIdentity(rawScene)
+    if (!this.allowed(scene)) {
+      const error = new Error('QQ_SCENE_UNAUTHORIZED')
+      error.code = 'QQ_SCENE_UNAUTHORIZED'
+      throw error
+    }
+    if (!this.store.getScene(scene)) {
+      const error = new Error('QQ_DELIVERY_NOT_FOUND')
+      error.code = 'QQ_DELIVERY_NOT_FOUND'
+      throw error
+    }
+    if (outcome !== 'failed') throw new TypeError('only failed reconciliation is supported')
+    if (this.inFlightDeliveries.has(`${sceneKey(scene)}:${actionId}`)) {
+      const error = new Error('QQ_DELIVERY_IN_FLIGHT')
+      error.code = 'QQ_DELIVERY_IN_FLIGHT'
+      throw error
+    }
+    return this.store.resolveUnknownDelivery(scene, actionId, 'failed')
   }
 
   async #ensureSession(scene) {
@@ -340,21 +374,27 @@ export class QQCore {
     // call; a revoked Scene must not reach OneBot. No request was made here, so
     // the reservation is settled as a terminal failure instead of lingering as
     // an unsettled action that would consume outbox capacity forever.
+    const inFlightKey = `${sceneKey(row)}:${actionId}`
+    this.inFlightDeliveries.add(inFlightKey)
     try {
-      this.#requireAuthorizedSession(sessionId, 'qq.send')
-    } catch (error) {
-      try { this.store.settleDelivery(row, actionId, 'failed') } catch { /* keep the permission failure */ }
-      throw error
-    }
-    try {
-      const receipt = await this.transport.send(row, segments)
-      const messageId = normalizeMessageId(receipt.messageId)
-      const delivery = this.store.settleDelivery(row, actionId, 'delivered', messageId)
-      return { status: delivery.status, repeated: false, messageId }
-    } catch (error) {
-      const status = error?.code === 'ONEBOT_REJECTED' ? 'failed' : 'unknown'
-      this.store.settleDelivery(row, actionId, status)
-      return { status, repeated: false, messageId: null }
+      try {
+        this.#requireAuthorizedSession(sessionId, 'qq.send')
+      } catch (error) {
+        try { this.store.settleDelivery(row, actionId, 'failed') } catch { /* keep the permission failure */ }
+        throw error
+      }
+      try {
+        const receipt = await this.transport.send(row, segments)
+        const messageId = normalizeMessageId(receipt.messageId)
+        const delivery = this.store.settleDelivery(row, actionId, 'delivered', messageId)
+        return { status: delivery.status, repeated: false, messageId }
+      } catch (error) {
+        const status = error?.code === 'ONEBOT_REJECTED' ? 'failed' : 'unknown'
+        this.store.settleDelivery(row, actionId, status)
+        return { status, repeated: false, messageId: null }
+      }
+    } finally {
+      this.inFlightDeliveries.delete(inFlightKey)
     }
   }
 

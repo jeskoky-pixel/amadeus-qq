@@ -420,4 +420,36 @@ export class QQStore {
       return clone(delivery)
     })
   }
+
+  /**
+   * Atomically close one settled unknown delivery as failed after explicit owner
+   * reconciliation. The compare-and-set lives inside the serialized state change:
+   * a concurrent settle or a second resolution cannot be overwritten.
+   */
+  resolveUnknownDelivery(identity, actionId, outcome = 'failed') {
+    if (typeof actionId !== 'string' || !/^[\w-]{1,100}$/.test(actionId)) throw new TypeError('invalid actionId')
+    if (outcome !== 'failed') throw new TypeError('only failed reconciliation is supported')
+    return this.#change(state => {
+      const row = state.scenes[sceneKey(identity)]
+      if (!row) {
+        const error = new Error('QQ_DELIVERY_NOT_FOUND')
+        error.code = 'QQ_DELIVERY_NOT_FOUND'
+        throw error
+      }
+      const delivery = row.deliveries.find(item => item.actionId === actionId)
+      if (!delivery) {
+        const error = new Error('QQ_DELIVERY_NOT_FOUND')
+        error.code = 'QQ_DELIVERY_NOT_FOUND'
+        throw error
+      }
+      if (delivery.status !== 'unknown') {
+        const error = new Error('QQ_DELIVERY_NOT_UNKNOWN')
+        error.code = 'QQ_DELIVERY_NOT_UNKNOWN'
+        throw error
+      }
+      delivery.status = 'failed'
+      delivery.updatedAt = Date.now()
+      return clone(delivery)
+    })
+  }
 }
