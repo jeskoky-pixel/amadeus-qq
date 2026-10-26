@@ -8,6 +8,7 @@ export const Config = z.object({
   connect: z.boolean().default(false),
   statePath: z.string().default(''),
   mediaRoot: z.string().default(''),
+  asrProviderId: z.string().default(''),
   sessionCwd: z.string().default(''),
   agentPreset: z.string().default(''),
   httpUrl: z.string().default(''),

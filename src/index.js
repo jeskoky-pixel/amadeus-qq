@@ -5,6 +5,7 @@ import { OneBotAdapter } from './onebot.js'
 import { acquireInstanceLease } from './lease.js'
 import { CapabilityRegistry } from './capabilities.js'
 import { readMessageImage } from './media.js'
+import { transcribeMessageRecord } from './audio.js'
 import { Config } from './config.js'
 import { apply as applyPresetGuard } from './preset-guard.mjs'
 import { ADMIN_PREFIX, createAdminHandler } from './admin-http.js'
@@ -17,6 +18,7 @@ const QQ_TOOL_NAMES = Object.freeze([
   'qq_send_message', 'qq_wait_for_messages', 'qq_get_unread_messages',
   'qq_mark_read', 'qq_connection_status', 'qq_capability_search',
   'qq_capability_describe', 'qq_capability_execute', 'qq_read_message_image',
+  'qq_transcribe_message_record',
 ])
 const QQ_TOOL_SET = new Set(QQ_TOOL_NAMES)
 const JSON_OBJECT = Object.freeze({ type: 'object', additionalProperties: true })
@@ -320,6 +322,48 @@ export function apply(ctx, config = {}) {
     }) } catch {
       // Missing optional Host media support must not disable ordinary QQ text.
       try { ctx.logger?.warn?.('amadeus-qq: image tool unavailable; attachment service could not be injected') } catch { /* optional diagnostic sink */ }
+    }
+  }
+
+  // Local record transcription is optional and only registered when an ASR
+  // provider id is explicitly configured and the Host speech service is live.
+  // The provider id comes from config; the model can supply only message
+  // identity and the record ordinal.
+  const asrProviderId = typeof config.asrProviderId === 'string' ? config.asrProviderId.trim() : ''
+  if (asrProviderId && typeof ctx.inject === 'function') {
+    let audioToolRegistered = false
+    try {
+      ctx.inject(['speechToText'], scope => {
+        const speechToText = scope?.speechToText ?? ctx.speechToText
+        if (audioToolRegistered ||
+          !speechToText ||
+          typeof speechToText.listProviders !== 'function' ||
+          typeof speechToText.resolve !== 'function' ||
+          typeof speechToText.transcribe !== 'function') return
+        audioToolRegistered = true
+        registerTool(ctx, {
+          name: 'qq_transcribe_message_record',
+          description: 'Transcribe one voice record already present in this Session’s bound QQ message, using only the message ID and record ordinal.',
+          parameters: { type: 'object', additionalProperties: false, properties: {
+            messageId: { type: 'string' },
+            index: { type: 'integer', minimum: 0 },
+          }, required: ['messageId'] },
+          timeoutMs: 140_000,
+          execute: (args, exec) => transcribeMessageRecord({
+            core,
+            store,
+            transport,
+            speechToText,
+            mediaRoot: config.mediaRoot,
+            providerId: asrProviderId,
+            sessionId: sessionIdOf(exec),
+            messageId: args.messageId,
+            index: args.index ?? 0,
+          }),
+        })
+      })
+    } catch {
+      try { ctx.logger?.warn?.('amadeus-qq: record transcription unavailable; speechToText service could not be injected') } catch { /* optional diagnostic sink */ }
     }
   }
 

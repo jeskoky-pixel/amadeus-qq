@@ -4,9 +4,11 @@ const MODE_LABELS = {
   observe: '只读观察',
   'safe-chat': '安全对话',
   enhanced: '增强对话',
-  'autonomous-social': '自主社交',
-  'owner-agent': '所有者代理（Owner Agent）',
+  'autonomous-social': '自主社交（部分功能待实现）',
+  'owner-agent': '所有者代理（Owner Agent，部分功能待实现）',
 }
+
+const RESERVED_MODE_NOTE = '部分功能待实现：Owner Agent 当前没有 Shell、文件、浏览器、GitHub 等通用工具执行路径；自主社交的 QQ 空间发布也未接入。保存只记录未来策略，QQ 能力仍以下方每项的实际生效状态为准。'
 
 const CAPABILITY_LABELS = {
   'qq.read': '读取 QQ 消息',
@@ -347,6 +349,9 @@ function Panel() {
               )),
             ),
           ),
+          draft.mode === 'owner-agent' || draft.mode === 'autonomous-social'
+            ? React.createElement('small', { className: 'muted', role: 'note' }, RESERVED_MODE_NOTE)
+            : null,
           ...(selected.capabilities ?? []).map(cap => React.createElement(
             'div',
             { className: 'editorRow', key: cap.id },

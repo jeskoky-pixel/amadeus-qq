@@ -173,6 +173,42 @@ test('missing attachment injection leaves ordinary QQ text tools available', t =
   for (const effect of host.effects.reverse()) effect()
 })
 
+test('record transcription registers only with an explicit provider and live speech service', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amadeus-qq-audio-tool-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const make = (asrProviderId, withService) => {
+    const host = fakeHost()
+    host.ctx.inject = (_services, fn) => fn(host.ctx)
+    if (withService) host.ctx.speechToText = {
+      listProviders: () => [{ id: 'local-qa', location: 'host-local' }],
+      resolve: spec => spec,
+      transcribe: async () => ({ text: 'unused' }),
+    }
+    apply(host.ctx, {
+      enabled: true, connect: false, statePath: path.join(dir, `${asrProviderId || 'none'}-${withService}.json`),
+      sessionCwd: dir, agentPreset: 'amadeus-qq', asrProviderId,
+      policy: { botIds: ['10001'], privateIds: ['30001'], groupIds: [] },
+    })
+    return host
+  }
+  const enabled = make('local-qa', true)
+  const audioTool = enabled.tools.get('qq_transcribe_message_record')
+  assert.ok(audioTool, 'explicit local ASR provider must register the transcription tool')
+  assert.deepEqual(Object.keys(audioTool.parameters.properties).sort(), ['index', 'messageId'])
+  assert.equal(enabled.tools.has('qq_read_message_image'), false)
+  assert.ok(enabled.tools.has('qq_send_message'))
+  await assert.rejects(audioTool.execute(
+    { messageId: '701', providerId: 'remote-qa' },
+    { agent: { session: { id: 'unbound' } } },
+  ), /unknown QQ tool argument/)
+
+  assert.equal(make('', true).tools.has('qq_transcribe_message_record'), false,
+    'no configured provider id must not register the tool')
+  assert.equal(make('local-qa', false).tools.has('qq_transcribe_message_record'), false,
+    'missing speech service must not register the tool')
+  for (const host of [enabled]) for (const effect of host.effects.reverse()) effect()
+})
+
 test('connector startup failure emits a bounded diagnostic instead of disappearing', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amadeus-qq-startup-'))
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }))

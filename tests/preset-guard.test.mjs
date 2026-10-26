@@ -90,6 +90,19 @@ test('image reader is visible only in the enhanced QQ preset', () => {
   assert.match(enhanced.state.guards[0]({ name: 'pwsh' }), /non-QQ tools/)
 })
 
+test('record transcription is visible only in the enhanced QQ preset', () => {
+  const basic = fakeHost([...QQ_TOOL_NAMES, 'pwsh'])
+  apply(basic.ctx, { level: 1 })
+  assert.match(basic.state.guards[0]({ name: 'qq_transcribe_message_record' }), /permission level 1/)
+  assert.equal(basic.state.restrictions.find(filter => filter.allow).allow.includes('qq_transcribe_message_record'), false)
+
+  const enhanced = fakeHost([...QQ_TOOL_NAMES, 'pwsh'])
+  apply(enhanced.ctx, { level: 2 })
+  assert.equal(enhanced.state.guards[0]({ name: 'qq_transcribe_message_record' }), undefined)
+  assert.equal(enhanced.state.restrictions.find(filter => filter.allow).allow.includes('qq_transcribe_message_record'), true)
+  assert.match(enhanced.state.guards[0]({ name: 'pwsh' }), /non-QQ tools/)
+})
+
 test('level 0 keeps observation tools and denies sends', () => {
   const { ctx, state } = fakeHost(QQ_TOOL_NAMES)
   apply(ctx, { level: 0 })

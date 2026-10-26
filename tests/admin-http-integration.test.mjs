@@ -126,6 +126,24 @@ test('management stays unavailable without optional Host services and does not b
   }))
 })
 
+test('unimplemented Owner capabilities never appear effective or authorize a bound Session', t => {
+  const { core, store } = coreFixture(t, { permissionPolicy: {
+    ownerPrivateIds: ['30001'], ownerTools: ['dsh.shell'],
+    accountGrants: { byBotId: { '10001': { qzonePublish: true } } },
+  } })
+  const ownerScene = { botId: '10001', kind: 'private', peerId: '30001' }
+  store.setScenePermissions(ownerScene, { mode: 'owner-agent' })
+  store.bindSession(ownerScene, 'owner-session')
+  const listed = core.listScenePermissions().find(row => row.scene.peerId === '30001')
+  assert.equal(listed.effectiveMode, 'owner-agent')
+  for (const id of ['dsh.shell', 'qq.qzone.publish']) {
+    const capability = listed.capabilities.find(item => item.id === id)
+    assert.equal(capability.implemented, false)
+    assert.equal(capability.effective, false, id)
+    assert.equal(core.authorizeSessionCapability('owner-session', id), false, id)
+  }
+})
+
 test('permission updates require exact revision, reject malformed bodies and keep stored state intact', async t => {
   const { core, store } = coreFixture(t)
   await core.ingest({ post_type: 'message', message_type: 'group', self_id: '10001', group_id: '20001',

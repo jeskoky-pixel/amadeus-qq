@@ -5,6 +5,9 @@ import { CAPABILITY_CATALOG, PermissionEngine, validateScenePermissions } from '
 
 const DEFAULT_WAIT_MS = 30_000
 const MAX_WAIT_MS = 300_000
+const IMPLEMENTED_CAPABILITIES = new Set(
+  CAPABILITY_CATALOG.filter(item => item.implemented === true).map(item => item.id),
+)
 
 function idSet(values, label) {
   if (!Array.isArray(values)) throw new TypeError(`${label} must be an array`)
@@ -51,6 +54,7 @@ export class QQCore {
   #permissionRevision(row) { return row.permissions?.revision ?? 0 }
 
   #can(scene, capability) {
+    if (!IMPLEMENTED_CAPABILITIES.has(capability)) return false
     return this.permissions.evaluate(scene, this.store.getScenePermissions(scene), capability).allowed
   }
 
@@ -160,8 +164,8 @@ export class QQCore {
               id: capability.id,
               implemented: capability.implemented,
               override: access?.overrides?.[capability.id] ?? 'inherit',
-              effective: decision.allowed,
-              reason: decision.reason,
+              effective: capability.implemented === true && decision.allowed,
+              reason: capability.implemented === true ? decision.reason : 'unimplemented',
             }
           }),
           health: {

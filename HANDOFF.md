@@ -1,5 +1,9 @@
 # amadeus-qq 交接
 
+## 当前检查点（2026-10-26，本地语音转写与能力状态）
+
+新增受 Scene 约束的本地 record→SenseVoice 转写工具；Owner Agent / 自主社交未实现能力不再显示为运行时有效，GUI 明示部分功能待实现。134 项测试中 132 通过、2 项因 Windows 符号链接权限跳过。QA.48 在隔离官方 DSH Desktop 中以本机合成语音和模拟 OneBot 完成真实模型工具调用及本地 ASR；撤权后旧 Session 被拒绝。隔离 Host 已恢复 `connect:false`，语音 Bundle 停用。详见 `docs/verification/LOCAL_RECORD_ASR_2026-10-26.md`。真实 NapCat、真实 QQ、媒体发送和通用 Owner Agent 仍未验收，PR #1 保持 Draft。
+
 ## 当前检查点（2026-10-26，消息响应归属）
 
 `qq.get_msg` 现在对平台返回正文核对请求消息 ID，并核对存在的 Scene/发送者字段。Codex 失败回归、原核心 DSH Creator 修复、Codex 复审与 QA.47 真实 DSH 模型工具调用已完成；错配正文未进入模型。126 项测试中 125 通过、1 项因 Windows 符号链接权限跳过；构建通过。隔离 Host 已恢复 `connect:false`。详见 `docs/verification/GET_MSG_SCOPE_2026-10-26.md`。PR #1 仍为 Draft。
