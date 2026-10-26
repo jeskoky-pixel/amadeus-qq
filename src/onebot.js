@@ -49,6 +49,24 @@ export function normalizeOneBotMessage(raw) {
   }
 }
 
+const MAX_FACE_ID = 1_000_000
+
+/**
+ * Normalize a standard QQ face ID. Only a canonical non-negative decimal ID
+ * within a small bound is accepted; any other data fields are intentionally
+ * dropped by the caller.
+ */
+function normalizeFaceId(value) {
+  if (typeof value === 'number') {
+    if (!Number.isSafeInteger(value) || value < 0 || value > MAX_FACE_ID) throw new TypeError('invalid face segment')
+    return String(value)
+  }
+  if (typeof value !== 'string' || !/^(0|[1-9]\d{0,6})$/.test(value)) throw new TypeError('invalid face segment')
+  const id = Number(value)
+  if (!Number.isSafeInteger(id) || id > MAX_FACE_ID) throw new TypeError('invalid face segment')
+  return String(id)
+}
+
 export function validateOutgoingSegments(raw) {
   if (!Array.isArray(raw) || raw.length < 1 || raw.length > 20) throw new TypeError('message must contain 1–20 segments')
   return raw.map(segment => {
@@ -59,6 +77,7 @@ export function validateOutgoingSegments(raw) {
     }
     if (segment.type === 'at') return { type: 'at', data: { qq: normalizeId(segment.data.qq, 'at.qq') } }
     if (segment.type === 'reply') return { type: 'reply', data: { id: normalizeMessageId(segment.data.id, 'reply.id') } }
+    if (segment.type === 'face') return { type: 'face', data: { id: normalizeFaceId(segment.data.id) } }
     throw new TypeError(`unsupported outgoing segment: ${String(segment.type)}`)
   })
 }

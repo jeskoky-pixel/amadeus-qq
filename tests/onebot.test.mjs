@@ -28,6 +28,14 @@ test('outgoing M1 segments refuse unregistered media and blank text', () => {
   assert.deepEqual(validateOutgoingSegments([{ type: 'at', data: { qq: '30001' } }]), [{ type: 'at', data: { qq: '30001' } }])
 })
 
+test('standard QQ face segments accept a bounded numeric ID and discard extra payload', () => {
+  assert.deepEqual(validateOutgoingSegments([{ type: 'face', data: { id: 14, file: '/private/ignored' } }]),
+    [{ type: 'face', data: { id: '14' } }])
+  assert.throws(() => validateOutgoingSegments([{ type: 'face', data: { id: -1 } }]), /face/i)
+  assert.throws(() => validateOutgoingSegments([{ type: 'face', data: { id: 'not-an-id' } }]), /face/i)
+  assert.throws(() => validateOutgoingSegments([{ type: 'face', data: { id: '999999999999999999999' } }]), /face/i)
+})
+
 test('adapter sends only a selected OneBot action and classifies platform rejection', async () => {
   const calls = []
   const adapter = new OneBotAdapter({ enabled: true, httpUrl: 'http://127.0.0.1:12345', wsUrl: 'ws://127.0.0.1:12346' }, {
