@@ -2,9 +2,90 @@ import { normalizeId, normalizeMessageId, sceneIdentity } from './storage.js'
 
 const SEGMENT_LIMIT = 100
 const EVENT_SIZE_LIMIT = 256 * 1024
+const MEDIA_SEGMENT_TYPES = new Set(['image', 'record', 'video', 'file'])
+const MAX_MEDIA_ID_LENGTH = 256
 
 function plainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+/**
+ * A media `file` field is an opaque platform handle, not a locator. Keep only
+ * short, single-token handles; every URL scheme, local path, UNC path, CQ code
+ * and control character is dropped so an inbound event can never carry a
+ * network or filesystem target into durable state or the model prompt.
+ */
+function safeMediaId(value) {
+  if (typeof value !== 'string' || value.length < 1 || value.length > MAX_MEDIA_ID_LENGTH) return null
+  if (value.trim() !== value) return null
+  if (/[\u0000-\u001f\u007f]/.test(value)) return null
+  if (/\[CQ:/i.test(value)) return null
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return null
+  if (/^[A-Za-z]:/.test(value)) return null
+  if (value.includes('/') || value.includes('\\')) return null
+  if (value === '.' || value === '..' || value.includes('..')) return null
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(value)) return null
+  return value
+}
+
+function safeId(value, normalize) {
+  try { return normalize(value) } catch { return null }
+}
+
+/**
+ * String-format OneBot messages may contain arbitrary CQ payloads. Their
+ * parameters can hold locators or inline data, so remove each complete code
+ * while leaving ordinary words on either side intact.
+ */
+function stripCqCodes(text) {
+  let removed = false
+  const stripped = text.replace(/\[CQ:[a-z_]+(?:,[^\]]*)?\]/gi, () => {
+    removed = true
+    return ' '
+  })
+  // Keep the words on both sides separate without carrying a CQ parameter.
+  return removed ? stripped.replace(/[ \t]{2,}/g, ' ').trim() : text
+}
+
+/**
+ * Every inbound segment is reduced to a per-type whitelist: text keeps only
+ * its text, at/reply keep only the IDs used for trigger and quote semantics,
+ * face keeps only a bounded face ID, media keep only a non-locating handle,
+ * and unknown segments keep their type with an empty data object. No URL,
+ * local path, base64/CQ locator or arbitrary platform field is retained.
+ */
+export function sanitizeInboundSegments(source) {
+  if (!Array.isArray(source)) throw new TypeError('invalid OneBot message segments')
+  if (source.length > SEGMENT_LIMIT) throw new Error('OneBot message has too many segments')
+  return source.map(segment => {
+    if (!plainObject(segment) || typeof segment.type !== 'string' || !/^[a-z_]{1,32}$/i.test(segment.type) || !plainObject(segment.data)) {
+      throw new TypeError('invalid OneBot segment')
+    }
+    const type = segment.type.toLowerCase()
+    if (type === 'text') {
+      const text = typeof segment.data.text === 'string' ? stripCqCodes(segment.data.text) : ''
+      return { type, data: { text } }
+    }
+    if (type === 'at') {
+      const qq = safeId(segment.data.qq, value => normalizeId(value, 'at.qq'))
+      return { type, data: qq === null ? {} : { qq } }
+    }
+    if (type === 'reply') {
+      // Preserve the existing distinction: a missing ID means "no reply",
+      // while a malformed non-empty ID still rejects the event.
+      if (segment.data.id == null) return { type, data: {} }
+      return { type, data: { id: normalizeMessageId(segment.data.id, 'reply.id') } }
+    }
+    if (type === 'face') {
+      const id = safeId(segment.data.id, normalizeFaceId)
+      return { type, data: id === null ? {} : { id } }
+    }
+    if (MEDIA_SEGMENT_TYPES.has(type)) {
+      const file = safeMediaId(segment.data.file)
+      return { type, data: file === null ? {} : { file } }
+    }
+    return { type, data: {} }
+  })
 }
 
 export function normalizeOneBotMessage(raw) {
@@ -21,13 +102,7 @@ export function normalizeOneBotMessage(raw) {
   const source = Array.isArray(raw.message)
     ? raw.message
     : [{ type: 'text', data: { text: String(raw.message ?? '') } }]
-  if (source.length > SEGMENT_LIMIT) throw new Error('OneBot message has too many segments')
-  const segments = source.map(segment => {
-    if (!plainObject(segment) || typeof segment.type !== 'string' || !/^[a-z_]{1,32}$/i.test(segment.type) || !plainObject(segment.data)) {
-      throw new TypeError('invalid OneBot segment')
-    }
-    return structuredClone({ type: segment.type, data: segment.data })
-  })
+  const segments = sanitizeInboundSegments(source)
   const atIds = segments.filter(item => item.type === 'at').map(item => {
     try { return normalizeId(item.data.qq, 'at.qq') } catch { return null }
   }).filter(Boolean)

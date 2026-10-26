@@ -12,6 +12,8 @@ const CAPABILITY_LABELS = {
   'qq.read': '读取 QQ 消息',
   'qq.send': '发送 QQ 消息',
   'dsh.search': 'DSH 搜索',
+  'qq.friends.read': '读取 QQ 好友目录',
+  'qq.groups.read': '读取 QQ 群目录',
   'qq.media.read': 'QQ 媒体读取',
   'qq.qzone.publish': 'QQ 空间发布',
   'dsh.shell': 'DSH Shell',
@@ -84,6 +86,7 @@ function Panel() {
   const [busy, setBusy] = React.useState(false)
   const [conflict, setConflict] = React.useState(false)
   const [notice, setNotice] = React.useState('')
+  const [selectionHint, setSelectionHint] = React.useState('')
   const loadSeq = React.useRef(0)
   const draftRef = React.useRef(null)
   const selectedKeyRef = React.useRef('')
@@ -100,6 +103,7 @@ function Panel() {
       if (seq !== loadSeq.current) return
       setData(next)
       setReadOnly(false)
+      setSelectionHint('')
       const list = Array.isArray(next.scenes) ? next.scenes : []
       const entry = list.find(item => item.key === selectedKeyRef.current) || list[0] || null
       setSelectedKey(entry?.key ?? '')
@@ -146,11 +150,20 @@ function Panel() {
   const disabled = busy || readOnly || conflict || !selected || !draft
 
   const selectScene = (entry) => {
+    if (busy) {
+      setSelectionHint('正在保存权限，请等待保存完成后再切换场景。')
+      return
+    }
+    const selection = nextDraftForSelection(selected, draft, entry)
+    if (selection.blocked) {
+      setSelectionHint('当前场景有未保存的权限修改；请先保存或取消修改后再切换场景。')
+      return
+    }
     setSelectedKey(entry.key)
-    const fresh = { ...draftFromEntry(entry), sceneKey: entry.key }
-    setDraft(fresh)
-    draftRef.current = fresh
+    setDraft(selection.draft)
+    draftRef.current = selection.draft
     setConflict(false)
+    setSelectionHint('')
     setNotice('')
     setError(null)
   }
@@ -174,6 +187,7 @@ function Panel() {
   const cancel = () => {
     if (conflict) {
       setConflict(false)
+      setSelectionHint('')
       void load({ forceSync: true })
       return
     }
@@ -182,18 +196,21 @@ function Panel() {
     setDraft(fresh)
     draftRef.current = fresh
     setConflict(false)
+    setSelectionHint('')
     setNotice('')
     setError(null)
   }
 
   const reloadLatest = () => {
     setConflict(false)
+    setSelectionHint('')
     void load({ forceSync: true })
   }
 
   const save = async () => {
     if (!selected || !draft || validation || busy || readOnly || conflict) return
     setBusy(true)
+    setSelectionHint('')
     setError(null)
     setNotice('')
     try {
@@ -267,6 +284,7 @@ function Panel() {
     readOnly ? React.createElement('div', { className: 'message error' }, '此页面为只读：当前请求没有通过 DSH Owner 验证，或管理接口不可用。仅本机访问不等于管理员授权。') : null,
     error ? React.createElement('div', { className: 'message error', role: 'alert' }, '读取或保存失败：' + friendlyError(error)) : null,
     notice ? React.createElement('div', { className: 'message success', role: 'status' }, notice) : null,
+    selectionHint ? React.createElement('div', { className: 'message error', role: 'alert' }, selectionHint) : null,
     loading && !data ? React.createElement('p', { role: 'status' }, '正在读取 QQ 场景…') : null,
     !loading && !error && scenes.length === 0
       ? React.createElement('div', { className: 'panel' }, React.createElement('p', null, '暂无已见且在允许列表内的 QQ 场景。'), React.createElement('small', null, '场景只有在收到可信 QQ 事件后才会出现在这里。'))

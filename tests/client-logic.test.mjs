@@ -5,6 +5,7 @@ import {
   draftFromEntry,
   fetchScenes,
   isDraftDirty,
+  nextDraftForSelection,
   savePermissions,
   validateDraft,
 } from '../src/client/logic.js'
@@ -41,6 +42,23 @@ test('draft and request construction preserve mode, explicit overrides and revis
     access: { mode: 'enhanced', overrides: { 'qq.send': 'allow' } },
     expectedRevision: 2,
   })
+})
+
+test('Scene selection never discards a dirty permission draft without an explicit cancel or save', () => {
+  const first = entry()
+  const second = entry({ key: '10001:group:20002', scene: { botId: '10001', kind: 'group', peerId: '20002' }, revision: 7 })
+  const dirty = { ...draftFromEntry(first), mode: 'enhanced' }
+  const same = nextDraftForSelection(first, dirty, first)
+  assert.equal(same.blocked, true)
+  assert.equal(same.draft, dirty)
+  assert.equal(same.draft.expectedRevision, 2)
+  const other = nextDraftForSelection(first, dirty, second)
+  assert.equal(other.blocked, true)
+  assert.equal(other.draft, dirty)
+  const clean = nextDraftForSelection(first, draftFromEntry(first), second)
+  assert.equal(clean.blocked, false)
+  assert.equal(clean.draft.sceneKey, second.key)
+  assert.equal(clean.draft.expectedRevision, 7)
 })
 
 test('owner-agent is locally rejected outside a configured owner private Scene', () => {

@@ -8,7 +8,7 @@ import { QQCore } from '../src/core.js'
 import { CapabilityRegistry } from '../src/capabilities.js'
 import { NAPCAT_ACTION_NAMES } from '../src/napcat-action-names.js'
 
-function fixture(t) {
+function fixture(t, { permissionPolicy = {} } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amadeus-qq-cap-'))
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
   const store = new QQStore(path.join(dir, 'qq.json'))
@@ -19,10 +19,13 @@ function fixture(t) {
   const calls = []
   const transport = { status: 'connected', async action(name, args) {
     calls.push({ name, args })
-    return name === 'get_group_member_list' ? Array.from({ length: 250 }, (_, i) => ({ user_id: i + 1 })) : { ok: true }
+    if (name === 'get_group_member_list') return Array.from({ length: 250 }, (_, i) => ({ user_id: i + 1 }))
+    if (name === 'get_friend_list') return Array.from({ length: 225 }, (_, i) => ({ user_id: i + 1, nickname: `friend-${i + 1}` }))
+    if (name === 'get_group_list') return Array.from({ length: 225 }, (_, i) => ({ group_id: i + 1, group_name: `group-${i + 1}` }))
+    return { ok: true }
   }, stop() {} }
   const core = new QQCore({ store, dsh: {}, transport,
-    policy: { botIds: ['10001'], groupIds: ['20001'], privateIds: ['30001'] } })
+    policy: { botIds: ['10001'], groupIds: ['20001'], privateIds: ['30001'] }, permissionPolicy })
   return { registry: new CapabilityRegistry({ core, store, transport }), core, calls, transport }
 }
 
@@ -100,5 +103,87 @@ test('a large OneBot read result is rejected before entering model context', asy
   core.store.appendMessage(group, { messageId: '801', senderId: '40001', segments: [] })
   transport.action = async () => ({ message: 'x'.repeat(70_000) })
   await assert.rejects(registry.execute('group-session', 'qq.get_msg', { messageId: '801' }), /QQ_CAPABILITY_RESULT_TOO_LARGE/)
+  core.close()
+})
+
+test('get_msg strips platform media locators and raw CQ content before model output', async t => {
+  const { registry, core, transport } = fixture(t)
+  const group = { botId: '10001', kind: 'group', peerId: '20001' }
+  core.store.appendMessage(group, { messageId: '802', senderId: '40001', segments: [] })
+  transport.action = async () => ({ message_id: 802, raw_message: '[CQ:image,file=raw-secret]',
+    message: [{ type: 'text', data: { text: 'hello' } },
+      { type: 'image', data: { file: 'https://media.invalid/image?token=media-secret', url: 'https://media.invalid/image?token=media-secret' } }],
+    file: 'C:\\private\\outside-secret.jpg' })
+  const result = await registry.execute('group-session', 'qq.get_msg', { messageId: '802' })
+  const serialized = JSON.stringify(result)
+  for (const secret of ['raw-secret', 'media-secret', 'outside-secret', 'media.invalid']) {
+    assert.equal(serialized.includes(secret), false, `${secret} must not enter model output`)
+  }
+  assert.match(serialized, /hello/)
+  assert.match(serialized, /802/)
+  core.close()
+})
+
+test('get_msg string-format response keeps ordinary text while removing CQ media locators', async t => {
+  const { registry, core, transport } = fixture(t)
+  const group = { botId: '10001', kind: 'group', peerId: '20001' }
+  core.store.appendMessage(group, { messageId: '803', senderId: '40001', segments: [] })
+  transport.action = async () => ({ message_id: 803,
+    message: 'look [CQ:image,file=https://media.invalid/image?token=getmsg-secret] please' })
+  const result = await registry.execute('group-session', 'qq.get_msg', { messageId: '803' })
+  const serialized = JSON.stringify(result)
+  assert.equal(serialized.includes('getmsg-secret'), false)
+  assert.match(serialized, /look/)
+  assert.match(serialized, /please/)
+  core.close()
+})
+
+test('account directories are Owner-only, explicitly granted, paged and never take model-supplied targets', async t => {
+  const { registry, core, calls } = fixture(t, { permissionPolicy: { ownerPrivateIds: ['30001'] } })
+  for (const id of ['qq.get_friend_list', 'qq.get_group_list']) {
+    assert.equal(registry.describe(id).risk, 'medium')
+    assert.equal(registry.describe(id).scenePermission, 'owner-private-explicit')
+  }
+  const owner = { botId: '10001', kind: 'private', peerId: '30001' }
+  const granted = { mode: 'owner-agent', overrides: { 'qq.friends.read': 'allow', 'qq.groups.read': 'allow' } }
+  core.store.setScenePermissions(owner, granted)
+  core.store.bindSession(owner, 'private-session')
+  await assert.rejects(registry.execute('group-session', 'qq.get_friend_list'), /PERMISSION_DENIED/)
+  await assert.rejects(registry.execute('group-session', 'qq.get_group_list'), /PERMISSION_DENIED/)
+  assert.equal(calls.length, 0)
+  const friends = await registry.execute('private-session', 'qq.get_friend_list', { offset: 100, limit: 50 })
+  assert.equal(friends.items.length, 50)
+  assert.equal(friends.total, 225)
+  assert.equal(friends.partial, true)
+  assert.deepEqual(calls.at(-1), { name: 'get_friend_list', args: {} })
+  const groups = await registry.execute('private-session', 'qq.get_group_list', { offset: 200, limit: 100 })
+  assert.equal(groups.items.length, 25)
+  assert.equal(groups.total, 225)
+  assert.equal(groups.partial, false)
+  assert.deepEqual(calls.at(-1), { name: 'get_group_list', args: {} })
+  await assert.rejects(registry.execute('private-session', 'qq.get_friend_list', { botId: '99999' }), /unexpected capability argument/)
+  await assert.rejects(registry.execute('private-session', 'qq.get_group_list', { limit: 1000 }), /limit/)
+  const before = calls.length
+  core.store.setScenePermissions(owner, { mode: 'owner-agent', overrides: { 'qq.friends.read': 'deny', 'qq.groups.read': 'deny' } })
+  await assert.rejects(registry.execute('private-session', 'qq.get_friend_list'), /PERMISSION|CHANGED/)
+  assert.equal(calls.length, before)
+  core.close()
+})
+
+test('revoking an Owner directory read during OneBot response prevents disclosure to the model', async t => {
+  const { registry, core, transport } = fixture(t, { permissionPolicy: { ownerPrivateIds: ['30001'] } })
+  const owner = { botId: '10001', kind: 'private', peerId: '30001' }
+  core.store.setScenePermissions(owner, { mode: 'owner-agent', overrides: { 'qq.friends.read': 'allow' } })
+  core.store.bindSession(owner, 'private-session')
+  let entered
+  const started = new Promise(resolve => { entered = resolve })
+  let release
+  const reply = new Promise(resolve => { release = resolve })
+  transport.action = async () => { entered(); return reply }
+  const request = registry.execute('private-session', 'qq.get_friend_list')
+  await started
+  core.store.setScenePermissions(owner, { mode: 'owner-agent', overrides: { 'qq.friends.read': 'deny' } })
+  release([{ user_id: 40001, nickname: 'revoked private result' }])
+  await assert.rejects(request, /PERMISSION|CHANGED/)
   core.close()
 })

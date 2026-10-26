@@ -37,6 +37,20 @@ export function isDraftDirty(entry, draft) {
   return false
 }
 
+/**
+ * Decide which draft the editor should show after a Scene row is selected.
+ * A dirty draft is never replaced: the operator must save or cancel first, so
+ * an unsaved permission change can never be lost by an accidental click.
+ */
+export function nextDraftForSelection(currentEntry, currentDraft, targetEntry) {
+  if (currentDraft && isDraftDirty(currentEntry, currentDraft)) {
+    return { blocked: true, draft: currentDraft }
+  }
+  if (!targetEntry) return { blocked: false, draft: null }
+  const fresh = { ...draftFromEntry(targetEntry), sceneKey: targetEntry.key }
+  return { blocked: false, draft: fresh }
+}
+
 export function validateDraft(entry, draft) {
   if (!entry || !draft) return '未选择场景'
   if (!MODE_IDS.includes(draft.mode)) return '模式无效'

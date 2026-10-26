@@ -22,6 +22,36 @@ test('OneBot event retains text, at, reply and media segments with stable scene 
   assert.equal(out.message.segments[3].data.file, 'image-id')
 })
 
+test('inbound media locators never enter the durable message or DSH prompt payload', () => {
+  const raw = { post_type: 'message', message_type: 'private', self_id: 10001, user_id: 30001,
+    message_id: 901, time: 123, message: [
+      { type: 'text', data: { text: 'see this', url: 'https://extra.invalid/extra-secret' } },
+      { type: 'image', data: { file: 'https://media.invalid/photo?token=secret-image', url: 'https://media.invalid/photo?token=secret-image' } },
+      { type: 'record', data: { file: 'C:\\private\\voice-secret.amr' } },
+      { type: 'video', data: { file: 'base64://secret-video' } },
+      { type: 'json', data: { data: 'https://rich.invalid/rich-secret' } },
+      { type: 'image', data: { file: 'safe-image-id' } },
+    ] }
+  const out = normalizeOneBotMessage(raw)
+  const serialized = JSON.stringify(out.message)
+  for (const secret of ['secret-image', 'voice-secret', 'secret-video', 'extra-secret', 'rich-secret', 'media.invalid', 'C:\\private']) {
+    assert.equal(serialized.includes(secret), false, `${secret} must not be persisted or prompted`)
+  }
+  assert.equal(out.message.segments[0].data.text, 'see this')
+  assert.equal(out.message.segments.at(-1).data.file, 'safe-image-id')
+})
+
+test('string-format OneBot CQ media codes do not expose media locators', () => {
+  const raw = { post_type: 'message', message_type: 'private', self_id: 10001, user_id: 30001,
+    message_id: 902, message: 'look [CQ:image,file=https://media.invalid/image?token=string-secret] [CQ:json,data=rich-code-secret] please' }
+  const out = normalizeOneBotMessage(raw)
+  const serialized = JSON.stringify(out.message)
+  assert.equal(serialized.includes('string-secret'), false)
+  assert.equal(serialized.includes('rich-code-secret'), false)
+  assert.match(serialized, /look/)
+  assert.match(serialized, /please/)
+})
+
 test('outgoing M1 segments refuse unregistered media and blank text', () => {
   assert.throws(() => validateOutgoingSegments([{ type: 'image', data: { file: '/local/private' } }]), /unsupported/)
   assert.throws(() => validateOutgoingSegments([{ type: 'text', data: { text: '   ' } }]), /invalid text/)

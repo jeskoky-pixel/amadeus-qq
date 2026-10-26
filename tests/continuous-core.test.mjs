@@ -51,6 +51,30 @@ function fixture(t, options = {}) {
   return { file, events, dsh, transport, make }
 }
 
+test('legacy stored media locators are sanitized when read into a DSH Session', async t => {
+  const prompts = []
+  const f = fixture(t, { prompt: request => { prompts.push(request); return { accepted: true } } })
+  const core = f.make()
+  const first = await core.ingest(group('777'))
+  core.close()
+  const saved = JSON.parse(fs.readFileSync(f.file, 'utf8'))
+  saved.scenes['10001:group:20001'].messages[0].segments.push({ type: 'image',
+    data: { file: 'C:\\private\\legacy-secret.jpg', url: 'https://media.invalid/legacy-secret' } })
+  fs.writeFileSync(f.file, JSON.stringify(saved))
+  const restarted = f.make()
+  const result = restarted.read(first.sessionId)
+  assert.equal(JSON.stringify(result).includes('legacy-secret'), false)
+  restarted.close()
+  const pending = JSON.parse(fs.readFileSync(f.file, 'utf8'))
+  pending.scenes['10001:group:20001'].messages[0].needsPrompt = true
+  pending.scenes['10001:group:20001'].messages[0].prompted = false
+  fs.writeFileSync(f.file, JSON.stringify(pending))
+  const resumed = f.make()
+  await resumed.resumePending()
+  assert.equal(JSON.stringify(prompts.at(-1)?.content).includes('legacy-secret'), false)
+  resumed.close()
+})
+
 test('Scene search grant reaches Session creation and revision change removes it', async t => {
   const grants = []
   const f = fixture(t, { create: (_scene, _sessionId, grant) => grants.push(grant?.searchAllowed) })

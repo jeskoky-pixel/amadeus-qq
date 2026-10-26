@@ -22,11 +22,14 @@ export const CAPABILITY_CATALOG = Object.freeze([
   Object.freeze({ id: 'qq.read', implemented: true }),
   Object.freeze({ id: 'qq.send', implemented: true }),
   Object.freeze({ id: 'dsh.search', implemented: true }),
+  Object.freeze({ id: 'qq.friends.read', implemented: true }),
+  Object.freeze({ id: 'qq.groups.read', implemented: true }),
   Object.freeze({ id: 'qq.media.read', implemented: false }),
   Object.freeze({ id: 'qq.qzone.publish', implemented: false }),
   Object.freeze({ id: 'dsh.shell', implemented: false }),
 ])
 const KNOWN_CAPABILITIES = new Set(CAPABILITY_CATALOG.map(item => item.id))
+const DIRECTORY_CAPABILITIES = new Set(['qq.friends.read', 'qq.groups.read'])
 const OVERRIDE_VALUES = new Set(['inherit', 'allow', 'deny'])
 const ID_PATTERN = /^[1-9]\d{0,19}$/
 
@@ -114,13 +117,22 @@ export class PermissionEngine {
     if (this.globalDeny.has(capability)) return decision(false, 'global-deny')
     const owner = scene.kind === 'private' && this.ownerPrivateIds.has(scene.peerId)
     if (mode === 'owner-agent' && !owner) return decision(false, 'owner-private-required')
+    const override = normalized?.overrides?.[capability] ?? 'inherit'
+    if (DIRECTORY_CAPABILITIES.has(capability)) {
+      // Account-wide directories are never inherited from the Owner mode and
+      // never granted by a non-owner Scene; each call needs an explicit allow on
+      // a verified owner private Scene in owner-agent mode.
+      if (!owner || mode !== 'owner-agent' || override !== 'allow') {
+        return decision(false, 'owner-directory-required')
+      }
+      return decision(true, 'scene-allow')
+    }
     if (capability === 'dsh.shell' && (!owner || mode !== 'owner-agent' || !this.ownerTools.has(capability))) {
       return decision(false, 'owner-tool-required')
     }
     if (capability === 'qq.qzone.publish' && !accountCanPublish(this.accountGrants, scene.botId)) {
       return decision(false, 'account-publish-required')
     }
-    const override = normalized?.overrides?.[capability] ?? 'inherit'
     if (override === 'deny') return decision(false, 'scene-deny')
     if (override === 'allow') return decision(true, 'scene-allow')
     return decision(MODE_TO_CAPABILITIES[mode].includes(capability), 'mode')

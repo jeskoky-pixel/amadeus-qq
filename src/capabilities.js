@@ -1,4 +1,5 @@
 import { normalizeId, normalizeMessageId } from './storage.js'
+import { sanitizeInboundSegments } from './onebot.js'
 import { NAPCAT_ACTION_NAMES } from './napcat-action-names.js'
 
 const BLOCKED = new Set([
@@ -10,7 +11,60 @@ const BLOCKED = new Set([
 
 const EMPTY = Object.freeze({ type: 'object', additionalProperties: false, properties: {} })
 const OBJECT = Object.freeze({ type: 'object', additionalProperties: true })
+const PAGING = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    offset: { type: 'integer', minimum: 0 },
+    limit: { type: 'integer', minimum: 1, maximum: 100 },
+  },
+  required: [],
+})
 const MAX_RESULT_CHARS = 64_000
+const DEFAULT_PAGE_LIMIT = 50
+
+function parsePaging(args) {
+  const offset = args.offset === undefined ? 0 : args.offset
+  const limit = args.limit === undefined ? DEFAULT_PAGE_LIMIT : args.limit
+  if (!Number.isSafeInteger(offset) || offset < 0) throw new TypeError('offset must be a non-negative safe integer')
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new TypeError('limit must be an integer from 1 to 100')
+  return { offset, limit }
+}
+
+function pageDirectory(data, paging) {
+  if (!Array.isArray(data)) throw new Error('QQ_CAPABILITY_INVALID_RESPONSE')
+  const items = data.slice(paging.offset, paging.offset + paging.limit)
+  return { items, total: data.length, partial: paging.offset + items.length < data.length }
+}
+
+/**
+ * `get_msg` is the only capability that returns a platform message body. Build
+ * an explicit whitelist so `raw_message`, CQ strings, media URLs/paths and
+ * arbitrary platform fields never reach model context.
+ */
+function projectPlatformMessage(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('QQ_CAPABILITY_INVALID_RESPONSE')
+  const projected = {}
+  if (data.message_id !== undefined) projected.message_id = normalizeMessageId(data.message_id, 'get_msg.message_id')
+  if (Number.isFinite(data.time)) projected.time = data.time
+  if (data.sender !== null && typeof data.sender === 'object' && !Array.isArray(data.sender)) {
+    const sender = {}
+    if (data.sender.user_id !== undefined) {
+      try { sender.user_id = normalizeId(data.sender.user_id, 'get_msg.sender.user_id') } catch { /* omit invalid ID */ }
+    }
+    if (typeof data.sender.nickname === 'string') sender.nickname = data.sender.nickname.slice(0, 100)
+    if (typeof data.sender.card === 'string') sender.card = data.sender.card.slice(0, 100)
+    if (Object.keys(sender).length) projected.sender = sender
+  }
+  if (Array.isArray(data.message)) projected.message = sanitizeInboundSegments(data.message)
+  else if (typeof data.message === 'string') {
+    projected.message = sanitizeInboundSegments([{ type: 'text', data: { text: data.message } }])
+  }
+  // Some OneBot implementations answer a probe with a bare boolean status.
+  // Retain that boolean only; every other unlisted field is discarded.
+  if (typeof data.ok === 'boolean') projected.ok = data.ok
+  return { data: projected }
+}
 
 function category(action) {
   if (/qzone/.test(action)) return 'qzone'
@@ -67,6 +121,18 @@ const EXECUTABLE = new Map([
     description: 'Read the logged-in QQ account summary. This capability accepts no target or scene arguments.',
     parameters: EMPTY,
     execute: () => ({}) }],
+  ['qq.get_friend_list', { action: 'get_friend_list', category: category('get_friend_list'), risk: 'medium',
+    scenePermission: 'owner-private-explicit',
+    requiredCapability: 'qq.friends.read',
+    description: 'Read a bounded page of the account friend directory; requires an explicit owner private grant.',
+    parameters: PAGING,
+    execute: () => ({}) }],
+  ['qq.get_group_list', { action: 'get_group_list', category: category('get_group_list'), risk: 'medium',
+    scenePermission: 'owner-private-explicit',
+    requiredCapability: 'qq.groups.read',
+    description: 'Read a bounded page of the account group directory; requires an explicit owner private grant.',
+    parameters: PAGING,
+    execute: () => ({}) }],
 ])
 
 function validateArgs(args, schema) {
@@ -106,7 +172,7 @@ export class CapabilityRegistry {
     const supported = [...EXECUTABLE].map(([id, definition]) => ({
       id, provider: 'onebot-v11', action: definition.action, category: definition.category,
       description: definition.description, parameters: definition.parameters, result: OBJECT,
-      accountPermission: 'configured-bot', scenePermission: 'bound-scene', risk: definition.risk ?? 'low',
+      accountPermission: 'configured-bot', scenePermission: definition.scenePermission ?? 'bound-scene', risk: definition.risk ?? 'low',
       status: this.transport.status === 'connected' ? 'unverified' : 'unavailable',
       schemaStatus: 'verified-local', executable: true,
     }))
@@ -133,13 +199,36 @@ export class CapabilityRegistry {
     const scene = this.core.authorizedScene(sessionId)
     const definition = EXECUTABLE.get(id)
     if (!definition) throw new Error('QQ_CAPABILITY_NOT_EXECUTABLE')
+    const requiredCapability = definition.requiredCapability ?? 'qq.read'
+    if (requiredCapability !== 'qq.read' &&
+      this.core.authorizeSessionCapability(sessionId, requiredCapability) !== true) {
+      throw new Error(`QQ_PERMISSION_DENIED: ${requiredCapability}`)
+    }
     validateArgs(args, definition.parameters)
+    const paging = id === 'qq.get_friend_list' || id === 'qq.get_group_list' ? parsePaging(args) : null
     if (this.transport.status !== 'connected') throw new Error('QQ_TRANSPORT_UNAVAILABLE')
     const params = definition.execute(args, scene, { store: this.store })
     const data = await this.transport.action(definition.action, params)
-    const result = id === 'qq.get_group_member_list' && Array.isArray(data)
-      ? { items: data.slice(0, 200), total: data.length, partial: data.length > 200 }
-      : { data }
+    // Reject an oversized raw platform response before shaping it. This keeps
+    // the bounded-result guarantee even when the whitelist would discard it.
+    if (id === 'qq.get_msg' && (JSON.stringify(data)?.length ?? 0) > MAX_RESULT_CHARS) {
+      throw new Error('QQ_CAPABILITY_RESULT_TOO_LARGE')
+    }
+    // A directory grant may be revoked while the platform call is in flight.
+    // Re-check the same capability against the current binding/revision before
+    // any response bytes are shaped into model-visible output.
+    if (requiredCapability !== 'qq.read' &&
+      this.core.authorizeSessionCapability(sessionId, requiredCapability) !== true) {
+      throw new Error(`QQ_PERMISSION_CHANGED: ${requiredCapability} was revoked during the read`)
+    }
+    let result
+    if (paging) result = pageDirectory(data, paging)
+    else if (id === 'qq.get_msg') result = projectPlatformMessage(data)
+    else if (id === 'qq.get_group_member_list' && Array.isArray(data)) {
+      result = { items: data.slice(0, 200), total: data.length, partial: data.length > 200 }
+    } else {
+      result = { data }
+    }
     if (JSON.stringify(result).length > MAX_RESULT_CHARS) throw new Error('QQ_CAPABILITY_RESULT_TOO_LARGE')
     return result
   }

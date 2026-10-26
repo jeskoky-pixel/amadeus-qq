@@ -49,6 +49,22 @@ test('Owner Agent is limited to a stable verified owner private ID', () => {
   assert.equal(engine.evaluate(groupA, { mode: 'safe-chat', overrides: { 'dsh.shell': 'allow' } }, 'dsh.shell').allowed, false)
 })
 
+test('account-wide friend and group directories require explicit Owner private grants', () => {
+  const engine = new PermissionEngine({ ownerPrivateIds: ['30001'] })
+  for (const capability of ['qq.friends.read', 'qq.groups.read']) {
+    assert.equal(CAPABILITY_CATALOG.find(item => item.id === capability)?.implemented, true)
+    const access = { mode: 'owner-agent', overrides: { [capability]: 'allow' } }
+    assert.equal(engine.evaluate(ownerPrivate, { mode: 'owner-agent' }, capability).allowed, false,
+      'Owner mode alone must not expose the account directory')
+    assert.equal(engine.evaluate(ownerPrivate, access, capability).allowed, true)
+    assert.equal(engine.evaluate(groupA, access, capability).allowed, false)
+    assert.equal(engine.evaluate(otherPrivate, access, capability).allowed, false)
+    assert.equal(engine.evaluate(ownerPrivate, { mode: 'safe-chat', overrides: { [capability]: 'allow' } }, capability).allowed, false)
+    assert.equal(new PermissionEngine({ ownerPrivateIds: ['30001'], globalDeny: [capability] })
+      .evaluate(ownerPrivate, access, capability).allowed, false)
+  }
+})
+
 test('Scene permission changes persist independently and advance a revision', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amadeus-qq-permissions-'))
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }))

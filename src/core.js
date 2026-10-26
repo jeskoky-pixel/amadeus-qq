@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { normalizeId, normalizeMessageId, sceneIdentity, sceneKey } from './storage.js'
-import { normalizeOneBotMessage, validateOutgoingSegments } from './onebot.js'
+import { normalizeOneBotMessage, sanitizeInboundSegments, validateOutgoingSegments } from './onebot.js'
 import { CAPABILITY_CATALOG, PermissionEngine, validateScenePermissions } from './permissions.js'
 
 const DEFAULT_WAIT_MS = 30_000
@@ -211,7 +211,7 @@ export class QQCore {
     if (!stored) throw new Error('QQ message is no longer in the durable inbox')
     const prompt = {
       scene: { botId: scene.botId, kind: scene.kind, peerId: scene.peerId },
-      messages: [stored],
+      messages: [{ ...stored, segments: sanitizeInboundSegments(stored.segments) }],
       readThroughSeq: seq,
       instruction: 'Use QQ tools for any QQ send. You may send, continue using tools, wait for messages, or remain silent. Plain assistant output is not a QQ delivery.',
     }
@@ -272,7 +272,12 @@ export class QQCore {
     const row = this.#requireAuthorizedSession(sessionId)
     const result = this.store.unread(row, afterSeq, limit)
     if (result.messages.length) this.store.markPresented(row, result.readThroughSeq)
-    return result
+    // Older development state files may contain raw OneBot media locators.
+    // Apply the same projection at both model-facing exits without changing
+    // the durable cursor or silently rewriting a pre-existing state file.
+    return { ...result, messages: result.messages.map(message => ({
+      ...message, segments: sanitizeInboundSegments(message.segments),
+    })) }
   }
 
   markRead(sessionId, throughSeq) {
