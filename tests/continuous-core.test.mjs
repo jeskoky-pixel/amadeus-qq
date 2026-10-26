@@ -38,7 +38,13 @@ function fixture(t, options = {}) {
     send: options.send ?? (async (_scene, segments) => { events.push(['send', segments]); return { messageId: '90001' } }),
     stop() {},
   }
-  const make = () => new QQCore({ store: new QQStore(file), dsh, transport, policy: options.policy ?? policy })
+  const make = () => new QQCore({
+    store: new QQStore(file, {
+      maxMessages: options.maxMessages ?? 500,
+      maxDeliveries: options.maxDeliveries ?? 500,
+    }),
+    dsh, transport, policy: options.policy ?? policy,
+  })
   return { file, events, dsh, transport, make }
 }
 
@@ -88,6 +94,41 @@ test('group scenes and owner private scene are isolated; passive group traffic d
   assert.equal((await core.ingest(group('999', '88888'))).status, 'unauthorized')
   assert.equal((await core.ingest(group('101'))).status, 'duplicate')
   core.close()
+})
+
+test('passive group chatter rolls over without blocking later addressed messages', async t => {
+  const f = fixture(t, { maxMessages: 8 })
+  const core = f.make()
+  const first = await core.ingest(group('100'))
+  for (let i = 0; i < 20; i++) {
+    await core.ingest(group(String(200 + i), '20001', [{ type: 'text', data: { text: `background ${i}` } }]))
+  }
+  const addressed = await core.ingest(group('999'))
+  assert.equal(addressed.status, 'prompted')
+  assert.equal(addressed.sessionId, first.sessionId)
+  const stored = new QQStore(f.file).getScene({ botId, kind: 'group', peerId: '20001' })
+  assert.ok(stored.messages.length <= 8)
+  assert.ok(stored.messages.some(item => item.messageId === '100'), 'unread addressed message survives')
+  assert.ok(stored.messages.some(item => item.messageId === '999'), 'new addressed message is delivered')
+  assert.equal(f.events.filter(item => item[0] === 'prompt').length, 2)
+  core.close()
+})
+
+test('delivered action ledger rolls over without losing recent retry protection', async t => {
+  const f = fixture(t, { maxDeliveries: 5 })
+  const core = f.make()
+  const { sessionId } = await core.ingest(privateMessage('301'))
+  const args = n => ({ actionId: `send-${n}`, segments: [{ type: 'text', data: { text: `message ${n}` } }] })
+  for (let n = 1; n <= 6; n++) {
+    assert.equal((await core.send(sessionId, args(n))).status, 'delivered')
+  }
+  const sendsBeforeRetry = f.events.filter(item => item[0] === 'send').length
+  assert.equal((await core.send(sessionId, args(6))).repeated, true)
+  assert.equal(f.events.filter(item => item[0] === 'send').length, sendsBeforeRetry)
+  core.close()
+  const restarted = f.make()
+  assert.equal((await restarted.send(sessionId, args(6))).repeated, true)
+  restarted.close()
 })
 
 test('unknown delivery remains unknown across restart and actionId cannot send twice', async t => {
