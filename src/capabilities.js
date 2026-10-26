@@ -1,4 +1,4 @@
-import { normalizeId } from './storage.js'
+import { normalizeId, normalizeMessageId } from './storage.js'
 import { NAPCAT_ACTION_NAMES } from './napcat-action-names.js'
 
 const BLOCKED = new Set([
@@ -10,6 +10,7 @@ const BLOCKED = new Set([
 
 const EMPTY = Object.freeze({ type: 'object', additionalProperties: false, properties: {} })
 const OBJECT = Object.freeze({ type: 'object', additionalProperties: true })
+const MAX_RESULT_CHARS = 64_000
 
 function category(action) {
   if (/qzone/.test(action)) return 'qzone'
@@ -42,6 +43,30 @@ const EXECUTABLE = new Map([
     execute: (args, scene) => { if (scene.kind !== 'group') throw new Error('QQ_GROUP_ONLY'); return { group_id: scene.peerId, user_id: normalizeId(args.userId, 'userId') } } }],
   ['qq.get_group_member_list', { action: 'get_group_member_list', category: 'group', description: 'Read a bounded list of members from this Session’s group.', parameters: EMPTY,
     execute: (_args, scene) => { if (scene.kind !== 'group') throw new Error('QQ_GROUP_ONLY'); return { group_id: scene.peerId } } }],
+  ['qq.get_msg', { action: 'get_msg', category: category('get_msg'), risk: risk('get_msg'),
+    description: 'Read one message that already exists in this Session’s durable QQ inbox.',
+    parameters: { type: 'object', additionalProperties: false, properties: { messageId: { type: 'string' } }, required: ['messageId'] },
+    execute: (args, scene, { store }) => {
+      const messageId = normalizeMessageId(args.messageId, 'messageId')
+      const row = store.getScene(scene)
+      if (!row?.messages.some(message => message.messageId === messageId)) throw new Error('QQ_MESSAGE_SCOPE')
+      return { message_id: messageId }
+    } }],
+  ['qq.get_stranger_info', { action: 'get_stranger_info', category: category('get_stranger_info'), risk: risk('get_stranger_info'),
+    description: 'Read a stable QQ user ID already observed in this Session’s bound Scene.',
+    parameters: { type: 'object', additionalProperties: false, properties: { userId: { type: 'string' } }, required: ['userId'] },
+    execute: (args, scene, { store }) => {
+      const userId = normalizeId(args.userId, 'userId')
+      const observed = scene.kind === 'private'
+        ? userId === scene.peerId
+        : (store.getScene(scene)?.messages.some(message => message.senderId === userId) ?? false)
+      if (!observed) throw new Error('QQ_PERSON_SCOPE')
+      return { user_id: userId }
+    } }],
+  ['qq.get_login_info', { action: 'get_login_info', category: category('get_login_info'), risk: risk('get_login_info'),
+    description: 'Read the logged-in QQ account summary. This capability accepts no target or scene arguments.',
+    parameters: EMPTY,
+    execute: () => ({}) }],
 ])
 
 function validateArgs(args, schema) {
@@ -81,7 +106,7 @@ export class CapabilityRegistry {
     const supported = [...EXECUTABLE].map(([id, definition]) => ({
       id, provider: 'onebot-v11', action: definition.action, category: definition.category,
       description: definition.description, parameters: definition.parameters, result: OBJECT,
-      accountPermission: 'configured-bot', scenePermission: 'bound-scene', risk: 'low',
+      accountPermission: 'configured-bot', scenePermission: 'bound-scene', risk: definition.risk ?? 'low',
       status: this.transport.status === 'connected' ? 'unverified' : 'unavailable',
       schemaStatus: 'verified-local', executable: true,
     }))
@@ -110,11 +135,12 @@ export class CapabilityRegistry {
     if (!definition) throw new Error('QQ_CAPABILITY_NOT_EXECUTABLE')
     validateArgs(args, definition.parameters)
     if (this.transport.status !== 'connected') throw new Error('QQ_TRANSPORT_UNAVAILABLE')
-    const params = definition.execute(args, scene)
+    const params = definition.execute(args, scene, { store: this.store })
     const data = await this.transport.action(definition.action, params)
-    if (id === 'qq.get_group_member_list' && Array.isArray(data)) {
-      return { items: data.slice(0, 200), total: data.length, partial: data.length > 200 }
-    }
-    return { data }
+    const result = id === 'qq.get_group_member_list' && Array.isArray(data)
+      ? { items: data.slice(0, 200), total: data.length, partial: data.length > 200 }
+      : { data }
+    if (JSON.stringify(result).length > MAX_RESULT_CHARS) throw new Error('QQ_CAPABILITY_RESULT_TOO_LARGE')
+    return result
   }
 }

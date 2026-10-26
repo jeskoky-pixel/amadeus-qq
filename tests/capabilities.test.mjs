@@ -76,3 +76,29 @@ test('capability execution checks current Scene read permission before OneBot ac
   assert.equal(calls.length, 0)
   core.close()
 })
+
+test('message and profile reads are limited to IDs observed in the bound Scene', async t => {
+  const { registry, core, calls } = fixture(t)
+  const group = { botId: '10001', kind: 'group', peerId: '20001' }
+  core.store.appendMessage(group, { messageId: '701', senderId: '40001', segments: [] })
+  assert.deepEqual(await registry.execute('group-session', 'qq.get_msg', { messageId: '701' }), { data: { ok: true } })
+  assert.deepEqual(calls.at(-1), { name: 'get_msg', args: { message_id: '701' } })
+  await assert.rejects(registry.execute('group-session', 'qq.get_msg', { messageId: '799' }), /QQ_MESSAGE_SCOPE/)
+  assert.deepEqual(await registry.execute('group-session', 'qq.get_stranger_info', { userId: '40001' }), { data: { ok: true } })
+  assert.deepEqual(calls.at(-1), { name: 'get_stranger_info', args: { user_id: '40001' } })
+  await assert.rejects(registry.execute('group-session', 'qq.get_stranger_info', { userId: '99999' }), /QQ_PERSON_SCOPE/)
+  await registry.execute('private-session', 'qq.get_stranger_info', { userId: '30001' })
+  await assert.rejects(registry.execute('private-session', 'qq.get_stranger_info', { userId: '40001' }), /QQ_PERSON_SCOPE/)
+  await registry.execute('group-session', 'qq.get_login_info')
+  assert.deepEqual(calls.at(-1), { name: 'get_login_info', args: {} })
+  core.close()
+})
+
+test('a large OneBot read result is rejected before entering model context', async t => {
+  const { registry, core, transport } = fixture(t)
+  const group = { botId: '10001', kind: 'group', peerId: '20001' }
+  core.store.appendMessage(group, { messageId: '801', senderId: '40001', segments: [] })
+  transport.action = async () => ({ message: 'x'.repeat(70_000) })
+  await assert.rejects(registry.execute('group-session', 'qq.get_msg', { messageId: '801' }), /QQ_CAPABILITY_RESULT_TOO_LARGE/)
+  core.close()
+})
