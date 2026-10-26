@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { normalizeId, normalizeMessageId, sceneIdentity, sceneKey } from './storage.js'
 import { normalizeOneBotMessage, validateOutgoingSegments } from './onebot.js'
-import { PermissionEngine } from './permissions.js'
+import { PermissionEngine, validateScenePermissions } from './permissions.js'
 
 const DEFAULT_WAIT_MS = 30_000
 const MAX_WAIT_MS = 300_000
@@ -94,11 +94,31 @@ export class QQCore {
     return this.policy.triggerNames.some(name => text.includes(name))
   }
 
-  async setScenePermissions(rawScene, access) {
+  async setScenePermissions(rawScene, access, { expectedRevision } = {}) {
     const scene = sceneIdentity(rawScene)
     if (!this.allowed(scene)) throw new Error('QQ_UNAUTHORIZED: Scene is outside the configured allowlist')
+    if (expectedRevision !== undefined && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)) {
+      throw new TypeError('expectedRevision must be a non-negative integer')
+    }
+    const normalized = validateScenePermissions(access, { allowRevision: false })
+    // Owner Agent is a property of a verified owner private Scene, never of a
+    // group and never of an arbitrary private peer. Reject before persisting so
+    // a GUI cannot save and display an unusable high-privilege configuration.
+    if (normalized.mode === 'owner-agent' &&
+      (scene.kind !== 'private' || !this.permissions.ownerPrivateIds.has(scene.peerId))) {
+      const forbidden = new Error('QQ_OWNER_AGENT_FORBIDDEN: owner-agent requires a configured owner private Scene')
+      forbidden.code = 'QQ_OWNER_AGENT_FORBIDDEN'
+      throw forbidden
+    }
     return this.#serial(scene, async () => {
-      const permissions = this.store.setScenePermissions(scene, access)
+      const currentRevision = this.store.getScenePermissions(scene)?.revision ?? 0
+      if (expectedRevision !== undefined && expectedRevision !== currentRevision) {
+        const conflict = new Error('QQ_PERMISSION_CONFLICT: Scene permissions changed since the GUI read them')
+        conflict.code = 'QQ_PERMISSION_CONFLICT'
+        conflict.currentRevision = currentRevision
+        throw conflict
+      }
+      const permissions = this.store.setScenePermissions(scene, normalized)
       const row = this.store.getScene(scene)
       if (row.sessionId) {
         if (typeof this.dsh.cancelSceneSession !== 'function') throw new Error('QQ_SESSION_CANCEL_UNAVAILABLE')
@@ -109,6 +129,36 @@ export class QQCore {
       }
       return permissions
     })
+  }
+
+  /**
+   * Safe metadata for the native management surface: only scenes already seen
+   * and inside the configured allowlist. Message bodies, credentials, Session
+   * IDs and configured paths never leave this boundary.
+   */
+  listScenePermissions() {
+    const snapshot = this.store.snapshot()
+    return Object.entries(snapshot.scenes)
+      .filter(([, row]) => this.allowed(row))
+      .map(([key, row]) => {
+        const permissions = row.permissions ?? null
+        const access = permissions === null
+          ? null
+          : { mode: permissions.mode, overrides: permissions.overrides }
+        return {
+          key,
+          scene: { botId: row.botId, kind: row.kind, peerId: row.peerId },
+          permissions: permissions === null
+            ? null
+            : { mode: permissions.mode, overrides: { ...permissions.overrides }, revision: permissions.revision },
+          revision: permissions?.revision ?? 0,
+          effectiveMode: this.permissions.evaluate(row, access, 'qq.read').mode,
+          health: {
+            sessionActive: Boolean(row.sessionId),
+            transport: this.transport.status ?? 'unknown',
+          },
+        }
+      })
   }
 
   async #ensureSession(scene) {

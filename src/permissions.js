@@ -68,6 +68,11 @@ export class PermissionEngine {
     for (const mode of [this.defaultMode, this.groupDefaultMode, this.privateDefaultMode]) {
       if (!validMode(mode)) throw new TypeError('Invalid default permission mode')
     }
+    // A group is never an Owner Agent Scene, even by default. Reject at
+    // construction so a GUI cannot inherit and display that configuration.
+    if (this.groupDefaultMode === 'owner-agent') {
+      throw new TypeError('groupDefaultMode cannot be owner-agent: groups cannot be Owner Agent Scenes')
+    }
     this.ownerPrivateIds = idSet(raw.ownerPrivateIds ?? [], 'ownerPrivateIds')
     this.ownerTools = stringSet(raw.ownerTools ?? [], 'ownerTools')
     this.globalDeny = stringSet(raw.globalDeny ?? [], 'globalDeny')

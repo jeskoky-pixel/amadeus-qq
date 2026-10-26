@@ -210,7 +210,7 @@ test('revocation during send reservation never reaches OneBot or leaves an unset
   }), /QQ_PERMISSION_CHANGED|QQ_PERMISSION_DENIED/)
   assert.equal(f.events.filter(event => event[0] === 'send').length, 0)
   const delivery = new QQStore(f.file).getScene(scene).deliveries.find(item => item.actionId === 'revoked-before-send')
-  assert.notEqual(delivery?.status, 'reserved', 'revoked action must not remain permanently unsettled')
+  assert.equal(delivery?.status, 'failed', 'revoked action must not remain permanently unsettled')
   core.close()
 })
 

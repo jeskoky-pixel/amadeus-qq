@@ -6,6 +6,7 @@ import { acquireInstanceLease } from './lease.js'
 import { CapabilityRegistry } from './capabilities.js'
 import { Config } from './config.js'
 import { apply as applyPresetGuard } from './preset-guard.mjs'
+import { ADMIN_PREFIX, createAdminHandler } from './admin-http.js'
 
 export const name = 'amadeus-qq'
 export const inject = ['tools', 'sessionController']
@@ -104,6 +105,37 @@ export function apply(ctx, config = {}) {
   })
   const core = new QQCore({ store, dsh, transport, policy: config.policy, permissionPolicy: config.permissions })
   const capabilities = new CapabilityRegistry({ core, store, transport })
+
+  // Native management is an optional Host capability. Without a web server or
+  // DSH Connection the API stays unavailable; the QQ connector keeps running.
+  if (typeof ctx.inject === 'function') {
+    try {
+      ctx.inject(['webServer', 'connection'], child => {
+        if (!child?.webServer || typeof child.webServer.register !== 'function') return
+        if (typeof child.effect !== 'function') return
+        try {
+          let connection = child.connection
+          if (connection === undefined && typeof child.get === 'function') {
+            try {
+              connection = child.get('connection')
+            } catch {
+              connection = undefined
+            }
+          }
+          const handler = createAdminHandler(core, connection)
+          child.effect(() => child.webServer.register({
+            kind: 'prefix',
+            path: ADMIN_PREFIX,
+            handler,
+          }))
+        } catch (error) {
+          ctx.logger?.warn?.(`amadeus-qq: native management API unavailable: ${error instanceof Error ? error.message : String(error)}`)
+        }
+      })
+    } catch (error) {
+      ctx.logger?.warn?.(`amadeus-qq: native management API unavailable: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
 
   // The guard is global so it also covers a QQ Session restored by DSH before
   // the plugin can attach a fresh per-Agent tool schema restriction.
