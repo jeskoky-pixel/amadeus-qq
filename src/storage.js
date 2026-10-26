@@ -1,0 +1,250 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { randomUUID } from 'node:crypto'
+
+const SCHEMA_VERSION = 1
+const ID_PATTERN = /^(0|[1-9]\d{0,19})$/
+const MESSAGE_ID_PATTERN = /^-?[1-9]\d{0,19}$/
+const DEFAULT_MAX_MESSAGES = 500
+const DEFAULT_MAX_SEEN = 2048
+const DEFAULT_MAX_DELIVERIES = 500
+
+export function normalizeId(value, label = 'id') {
+  const text = typeof value === 'number' && Number.isSafeInteger(value) ? String(value) : value
+  if (typeof text !== 'string' || !ID_PATTERN.test(text) || text === '0') {
+    throw new TypeError(`${label} must be a positive decimal platform ID`)
+  }
+  return text
+}
+
+export function normalizeMessageId(value, label = 'messageId') {
+  const text = typeof value === 'number' && Number.isSafeInteger(value) ? String(value) : value
+  if (typeof text !== 'string' || !MESSAGE_ID_PATTERN.test(text)) {
+    throw new TypeError(`${label} must be a nonzero decimal message ID`)
+  }
+  return text
+}
+
+export function sceneIdentity(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new TypeError('scene must be an object')
+  const botId = normalizeId(raw.botId, 'botId')
+  if (raw.kind !== 'group' && raw.kind !== 'private') throw new TypeError('scene kind must be group or private')
+  const peerId = normalizeId(raw.peerId, 'peerId')
+  return Object.freeze({ botId, kind: raw.kind, peerId })
+}
+
+export function sceneKey(raw) {
+  const scene = sceneIdentity(raw)
+  return `${scene.botId}:${scene.kind}:${scene.peerId}`
+}
+
+function emptyState() {
+  return { schemaVersion: SCHEMA_VERSION, scenes: {} }
+}
+
+function clone(value) {
+  return structuredClone(value)
+}
+
+function validateState(state) {
+  if (!state || state.schemaVersion !== SCHEMA_VERSION || !state.scenes || typeof state.scenes !== 'object' || Array.isArray(state.scenes)) {
+    throw new Error('QQ state schema is invalid; refusing to reset durable state')
+  }
+  const boundSessions = new Set()
+  for (const [key, row] of Object.entries(state.scenes)) {
+    if (sceneKey(row) !== key || !Array.isArray(row.messages) || !Array.isArray(row.seenIds) || !Array.isArray(row.deliveries)) {
+      throw new Error(`QQ state contains an invalid scene row: ${key}`)
+    }
+    if (row.sessionId !== null && (typeof row.sessionId !== 'string' || !row.sessionId)) {
+      throw new Error(`QQ state contains an invalid Session: ${key}`)
+    }
+    if (row.sessionId) {
+      if (boundSessions.has(row.sessionId)) throw new Error('QQ state binds one DSH Session to multiple scenes')
+      boundSessions.add(row.sessionId)
+    }
+  }
+}
+
+function durableWrite(file, state) {
+  const dir = path.dirname(file)
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const temp = path.join(dir, `.${path.basename(file)}.${randomUUID()}.tmp`)
+  let created = false
+  try {
+    const fd = fs.openSync(temp, 'wx', 0o600)
+    created = true
+    try {
+      fs.writeFileSync(fd, JSON.stringify(state))
+      fs.fsyncSync(fd)
+    } finally {
+      fs.closeSync(fd)
+    }
+    fs.renameSync(temp, file)
+    try {
+      const dirFd = fs.openSync(dir, 'r')
+      try { fs.fsyncSync(dirFd) } finally { fs.closeSync(dirFd) }
+    } catch {
+      // Windows does not always permit directory fsync. File fsync + atomic rename remain required.
+    }
+  } catch (error) {
+    if (created) { try { fs.unlinkSync(temp) } catch {} }
+    throw error
+  }
+}
+
+export class QQStore {
+  constructor(file, limits = {}) {
+    if (typeof file !== 'string' || !path.isAbsolute(file)) throw new TypeError('state file must be absolute')
+    this.file = file
+    this.maxMessages = limits.maxMessages ?? DEFAULT_MAX_MESSAGES
+    this.maxSeen = limits.maxSeen ?? DEFAULT_MAX_SEEN
+    this.maxDeliveries = limits.maxDeliveries ?? DEFAULT_MAX_DELIVERIES
+    for (const n of [this.maxMessages, this.maxSeen, this.maxDeliveries]) {
+      if (!Number.isSafeInteger(n) || n < 1) throw new TypeError('state limits must be positive integers')
+    }
+    this.state = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : emptyState()
+    validateState(this.state)
+  }
+
+  snapshot() { return clone(this.state) }
+
+  #change(edit) {
+    const next = clone(this.state)
+    const result = edit(next)
+    validateState(next)
+    durableWrite(this.file, next)
+    this.state = next
+    return result
+  }
+
+  #row(state, identity) {
+    const scene = sceneIdentity(identity)
+    const key = sceneKey(scene)
+    state.scenes[key] ??= { ...scene, sessionId: null, authEpoch: 0, nextSeq: 1, readSeq: 0, presentedSeq: 0, promptedSeq: 0, messages: [], seenIds: [], deliveries: [] }
+    return state.scenes[key]
+  }
+
+  getScene(identity) {
+    const row = this.state.scenes[sceneKey(identity)]
+    return row ? clone(row) : null
+  }
+
+  sceneForSession(sessionId) {
+    if (typeof sessionId !== 'string' || !sessionId) return null
+    const matches = Object.values(this.state.scenes).filter(row => row.sessionId === sessionId)
+    if (matches.length > 1) throw new Error('one DSH Session is bound to multiple QQ scenes')
+    return matches.length ? clone(matches[0]) : null
+  }
+
+  bindSession(identity, sessionId, authEpoch = 0) {
+    if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 200) throw new TypeError('invalid DSH Session ID')
+    if (!Number.isSafeInteger(authEpoch) || authEpoch < 0) throw new TypeError('invalid authorization epoch')
+    return this.#change(state => {
+      const row = this.#row(state, identity)
+      if (row.sessionId && row.sessionId !== sessionId) throw new Error('scene already has a DSH Session')
+      if (Object.values(state.scenes).some(other => other !== row && other.sessionId === sessionId)) {
+        throw new Error('DSH Session is already bound to another scene')
+      }
+      row.sessionId = sessionId
+      row.authEpoch = authEpoch
+      return clone(row)
+    })
+  }
+
+  updateAuthEpoch(identity, authEpoch) {
+    if (!Number.isSafeInteger(authEpoch) || authEpoch < 0) throw new TypeError('invalid authorization epoch')
+    return this.#change(state => { const row = this.#row(state, identity); row.authEpoch = authEpoch; return clone(row) })
+  }
+
+  markPresented(identity, throughSeq) {
+    if (!Number.isSafeInteger(throughSeq) || throughSeq < 0) throw new TypeError('invalid throughSeq')
+    return this.#change(state => {
+      const row = this.#row(state, identity)
+      if (throughSeq >= row.nextSeq) throw new RangeError('presentation exceeds received message waterline')
+      row.presentedSeq = Math.max(row.presentedSeq, throughSeq)
+      return row.presentedSeq
+    })
+  }
+
+  markPrompted(identity, throughSeq) {
+    if (!Number.isSafeInteger(throughSeq) || throughSeq < 0) throw new TypeError('invalid throughSeq')
+    return this.#change(state => {
+      const row = this.#row(state, identity)
+      if (throughSeq >= row.nextSeq) throw new RangeError('prompt exceeds received message waterline')
+      const message = row.messages.find(item => item.seq === throughSeq)
+      if (!message) throw new Error('prompted message is no longer stored')
+      message.prompted = true
+      row.promptedSeq = Math.max(row.promptedSeq, throughSeq)
+      row.presentedSeq = Math.max(row.presentedSeq, throughSeq)
+      return row.promptedSeq
+    })
+  }
+
+  appendMessage(identity, message) {
+    const messageId = normalizeMessageId(message?.messageId, 'messageId')
+    return this.#change(state => {
+      const row = this.#row(state, identity)
+      if (row.seenIds.includes(messageId)) return { duplicate: true, seq: null }
+      while (row.messages.length >= this.maxMessages && row.messages[0].seq <= row.readSeq) row.messages.shift()
+      if (row.messages.length >= this.maxMessages) throw new Error('QQ_QUEUE_FULL: unread message limit reached')
+      const seq = row.nextSeq++
+      row.messages.push({ ...clone(message), messageId, seq, prompted: false })
+      row.seenIds.push(messageId)
+      if (row.seenIds.length > this.maxSeen) row.seenIds.splice(0, row.seenIds.length - this.maxSeen)
+      return { duplicate: false, seq }
+    })
+  }
+
+  unread(identity, afterSeq = 0, limit = 50) {
+    if (!Number.isSafeInteger(afterSeq) || afterSeq < 0) throw new TypeError('invalid afterSeq')
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) throw new TypeError('invalid limit')
+    const row = this.getScene(identity)
+    if (!row) return { messages: [], readThroughSeq: 0, unreadCount: 0 }
+    if (afterSeq >= row.nextSeq) throw new RangeError('afterSeq exceeds received message waterline')
+    const pending = row.messages.filter(item => item.seq > Math.max(row.readSeq, afterSeq))
+    const messages = pending.slice(0, limit)
+    return { messages, readThroughSeq: messages.at(-1)?.seq ?? Math.max(row.readSeq, afterSeq), unreadCount: pending.length, partial: pending.length > messages.length }
+  }
+
+  markRead(identity, throughSeq) {
+    if (!Number.isSafeInteger(throughSeq) || throughSeq < 0) throw new TypeError('invalid throughSeq')
+    return this.#change(state => {
+      const row = this.#row(state, identity)
+      if (throughSeq > row.presentedSeq) throw new RangeError('cannot mark unread unseen messages as read')
+      row.readSeq = Math.max(row.readSeq, throughSeq)
+      return row.readSeq
+    })
+  }
+
+  reserveDelivery(identity, actionId, fingerprint) {
+    if (typeof actionId !== 'string' || !/^[\w-]{1,100}$/.test(actionId)) throw new TypeError('invalid actionId')
+    if (typeof fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(fingerprint)) throw new TypeError('invalid fingerprint')
+    return this.#change(state => {
+      const row = this.#row(state, identity)
+      const prior = row.deliveries.find(item => item.actionId === actionId)
+      if (prior) {
+        if (prior.fingerprint !== fingerprint) throw new Error('QQ_ACTION_CONFLICT: actionId reused with different content')
+        return { fresh: false, delivery: clone(prior) }
+      }
+      // Never prune an action ID silently: that would permit a later duplicate send.
+      if (row.deliveries.length >= this.maxDeliveries) throw new Error('QQ_OUTBOX_FULL: action ledger requires maintenance')
+      const delivery = { actionId, fingerprint, status: 'unknown', platformMessageId: null, updatedAt: Date.now() }
+      row.deliveries.push(delivery)
+      return { fresh: true, delivery: clone(delivery) }
+    })
+  }
+
+  settleDelivery(identity, actionId, status, platformMessageId = null) {
+    if (!['delivered', 'failed', 'unknown'].includes(status)) throw new TypeError('invalid delivery status')
+    return this.#change(state => {
+      const row = this.#row(state, identity)
+      const delivery = row.deliveries.find(item => item.actionId === actionId)
+      if (!delivery) throw new Error('delivery not reserved')
+      if (delivery.status === 'delivered' && status !== 'delivered') throw new Error('delivered action cannot be downgraded')
+      delivery.status = status
+      delivery.platformMessageId = platformMessageId === null ? null : normalizeMessageId(platformMessageId, 'platformMessageId')
+      delivery.updatedAt = Date.now()
+      return clone(delivery)
+    })
+  }
+}

@@ -1,5 +1,13 @@
 # amadeus-qq 交接
 
+## 最新检查点（2026-10-26，M1 隔离候选）
+
+当前分支仍为 `codex/m0-baseline`，PR #1 未合并。先看 `docs/verification/M1_CANDIDATE_2026-10-26.md` 和当前工作树，不要把下面的 M0 历史记录当作现状。`npm test` 当前 39/39；真实隔离 DSH 的旧候选已通过双发送、模型工具调用、非 QQ 工具拒绝和模拟事件等待续接。Codex 修复了等待消息重启重复投递的回归，但修复后的真实重启链路待复验。
+
+受限 Agent preset 尚未通过官方 DSH 装载：同包自定义 guard 子项报 `never started`，无 guard 又会继承全局 Memory 工具。当前安装包未注册该 preset，源码拒绝以通用 `cordis`/`standard` 创建 QQ Session，真实 QQ 保持断开。原型保留在本地未提交的 `.dev/refs/`，不在 tarball 中。原隔离 QA Profile 内有旧合成 Session 与模拟 OneBot 状态，精确 ID/路径只见忽略的 `private/qq-development/`。不要向真实 QQ 发送或调整生产配置。
+
+同一隔离 Profile 的旧 QQ `cordis` Session 还收到 Memory 自动注入的跨会话合成上下文；仅限制模型工具不足以隔离提示词。QQ + Memory 联合使用前，必须接通可信 Scene 与自动注入门禁，并验证非 QQ 记忆使用不回退。
+
 更新日期：2026-10-25（Asia/Shanghai）。M0 部分完成。
 
 ## M0 最新入口
