@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { validateScenePermissions } from './permissions.js'
 
 const SCHEMA_VERSION = 1
 const ID_PATTERN = /^(0|[1-9]\d{0,19})$/
@@ -68,6 +69,10 @@ function validateState(state) {
     }
     if (row.deliveryArchive !== undefined && !Array.isArray(row.deliveryArchive)) {
       throw new Error(`QQ state contains an invalid delivery archive: ${key}`)
+    }
+    if (row.permissions !== undefined) {
+      try { validateScenePermissions(row.permissions, { requireRevision: true }) }
+      catch { throw new Error(`QQ state contains invalid Scene permissions: ${key}`) }
     }
     for (const message of row.messages) {
       if (message.needsPrompt !== undefined && typeof message.needsPrompt !== 'boolean') {
@@ -188,6 +193,21 @@ export class QQStore {
   getScene(identity) {
     const row = this.state.scenes[sceneKey(identity)]
     return row ? clone(row) : null
+  }
+
+  getScenePermissions(identity) {
+    const row = this.state.scenes[sceneKey(identity)]
+    return row?.permissions ? clone(row.permissions) : null
+  }
+
+  setScenePermissions(identity, access) {
+    const normalized = validateScenePermissions(access, { allowRevision: false })
+    return this.#change(state => {
+      const row = this.#row(state, identity)
+      const revision = (row.permissions?.revision ?? 0) + 1
+      row.permissions = { ...normalized, revision }
+      return clone(row.permissions)
+    })
   }
 
   sceneForSession(sessionId) {

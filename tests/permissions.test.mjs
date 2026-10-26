@@ -31,6 +31,10 @@ test('per-Scene override permits a low-risk read but cannot bypass global or acc
   assert.equal(engine.evaluate(groupA, access, 'dsh.search').allowed, false)
   assert.equal(engine.evaluate(groupA, access, 'qq.qzone.publish').allowed, false)
   assert.equal(new PermissionEngine().evaluate(groupB, { mode: 'observe', overrides: { 'dsh.search': 'allow' } }, 'dsh.search').allowed, true)
+  const accountGranted = new PermissionEngine({ accountGrants: { byBotId: { '10001': { qzonePublish: true } } } })
+  assert.equal(accountGranted.evaluate(groupA, { mode: 'autonomous-social' }, 'qq.qzone.publish').allowed, true)
+  assert.equal(new PermissionEngine({ accountGrants: { qzonePublish: true } })
+    .evaluate(groupA, { mode: 'autonomous-social' }, 'qq.qzone.publish').allowed, false)
 })
 
 test('Owner Agent is limited to a stable verified owner private ID', () => {
@@ -51,6 +55,7 @@ test('Scene permission changes persist independently and advance a revision', t 
   assert.equal(store.setScenePermissions(groupA, { mode: 'observe', overrides: {} }).revision, 2)
   const reopened = new QQStore(file)
   assert.deepEqual(reopened.getScenePermissions(groupA), { mode: 'observe', overrides: {}, revision: 2 })
+  assert.equal(new PermissionEngine().evaluate(groupA, reopened.getScenePermissions(groupA), 'qq.send').allowed, false)
   assert.equal(reopened.getScenePermissions(groupB), null)
   const before = fs.readFileSync(file, 'utf8')
   assert.throws(() => reopened.setScenePermissions(groupB, { mode: 'owner-agent', overrides: { 'qq.send': 'yes' } }))
