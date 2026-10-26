@@ -74,7 +74,20 @@ test('visible restriction becomes the QQ allow list once the connector registers
   state.schemas = [...QQ_TOOL_NAMES.map(name => ({ name })), { name: 'pwsh' }]
   state.listeners.get('tools/change')()
   const allow = state.restrictions.find(filter => filter.allow)
-  assert.deepEqual(allow.allow, [...QQ_TOOL_NAMES])
+  assert.deepEqual(allow.allow, toolsForLevel(1))
+})
+
+test('image reader is visible only in the enhanced QQ preset', () => {
+  const basic = fakeHost([...QQ_TOOL_NAMES, 'pwsh'])
+  apply(basic.ctx, { level: 1 })
+  assert.match(basic.state.guards[0]({ name: 'qq_read_message_image' }), /permission level 1/)
+  assert.equal(basic.state.restrictions.find(filter => filter.allow).allow.includes('qq_read_message_image'), false)
+
+  const enhanced = fakeHost([...QQ_TOOL_NAMES, 'pwsh'])
+  apply(enhanced.ctx, { level: 2 })
+  assert.equal(enhanced.state.guards[0]({ name: 'qq_read_message_image' }), undefined)
+  assert.equal(enhanced.state.restrictions.find(filter => filter.allow).allow.includes('qq_read_message_image'), true)
+  assert.match(enhanced.state.guards[0]({ name: 'pwsh' }), /non-QQ tools/)
 })
 
 test('level 0 keeps observation tools and denies sends', () => {

@@ -2,7 +2,7 @@
 
 通过独立无头 NapCat 接入 QQ，维护持续收发、工具操作、等待续接、媒体、路由、去重和回执。
 
-**当前状态：v1.0 隔离开发候选，PR #1 仍为 Draft。**已有独立 DSH 插件包、持续 Session 核心、模拟 OneBot 回放、受限 Agent preset、逐 Scene 权限管理接口和原生 Settings GUI。隔离 DSH Desktop 已验证 GUI 场景选择、权限保存、并发冲突及重启持久性；见 [GUI 隔离验收](docs/verification/GUI_STAGE_2026-10-26.md)。`qq.read`、`qq.send`、经 Scene 授权的 DSH `web_search`，以及 Owner 私聊逐项授权的好友/群目录读取已有运行路径；搜索和目录的真实 Host 证据分别见 [搜索权限验收](docs/verification/SEARCH_BOUNDARY_2026-10-26.md)、[目录读取验收](docs/verification/DIRECTORY_BOUNDARY_2026-10-26.md)。入站媒体定位信息已做隔离清洗并经真实 Host 测试，见 [媒体边界验收](docs/verification/MEDIA_BOUNDARY_2026-10-26.md)；媒体读取、空间、Shell 等能力仍标为策略占位。独立无头 NapCat、真实 QQ、完整媒体与空间、生态联动和跨场景 Memory 隐私尚未完成真实验收，不可部署到日常 QQ。
+**当前状态：v1.0 隔离开发候选，PR #1 仍为 Draft。**已有独立 DSH 插件包、持续 Session 核心、模拟 OneBot 回放、受限 Agent preset、逐 Scene 权限管理接口和原生 Settings GUI。隔离 DSH Desktop 已验证 GUI 场景选择、权限保存、并发冲突及重启持久性；见 [GUI 隔离验收](docs/verification/GUI_STAGE_2026-10-26.md)。`qq.read`、`qq.send`、经 Scene 授权的 DSH `web_search`，以及 Owner 私聊逐项授权的好友/群目录读取已有运行路径；搜索和目录的真实 Host 证据分别见 [搜索权限验收](docs/verification/SEARCH_BOUNDARY_2026-10-26.md)、[目录读取验收](docs/verification/DIRECTORY_BOUNDARY_2026-10-26.md)。入站媒体定位信息已做隔离清洗，Enhanced Scene 的单张本地图片读取已通过真实 Host 附件、模型调用、撤权和重启验收；见 [媒体边界验收](docs/verification/MEDIA_BOUNDARY_2026-10-26.md)与[图片读取验收](docs/verification/MEDIA_READ_2026-10-26.md)。语音/视频/文件、媒体发送、空间、Shell 等能力仍待实现或验证。独立无头 NapCat、真实 QQ、生态联动和跨场景 Memory 隐私尚未完成真实验收，不可部署到日常 QQ。
 
 项目入口：[Amadeus-dsh](https://github.com/jeskoky-pixel/Amadeus-dsh)。开发顺序：P0。当前仓库已于 2026-10-25 根据用户要求公开，便于网页端审阅。
 

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
 import { test } from 'node:test'
 import { normalizeOneBotMessage, OneBotAdapter, validateOutgoingSegments } from '../src/onebot.js'
 
@@ -82,4 +83,22 @@ test('adapter sends only a selected OneBot action and classifies platform reject
   })
   await assert.rejects(denied.action('send_group_msg', {}), { code: 'ONEBOT_REJECTED' })
   assert.equal(new OneBotAdapter().status, 'disabled')
+})
+
+test('rejected inbound processing emits a bounded diagnostic without private event content', async () => {
+  const socket = new EventEmitter()
+  const diagnostics = []
+  const adapter = new OneBotAdapter({ enabled: true, httpUrl: 'http://127.0.0.1:12345', wsUrl: 'ws://127.0.0.1:12346' }, {
+    makeWebSocket: class { constructor() { return socket } },
+    onDiagnostic: diagnostic => diagnostics.push(diagnostic),
+  })
+  await adapter.start(async () => { throw new Error('private-message-token') })
+  socket.emit('open')
+  socket.emit('message', Buffer.from(JSON.stringify({ post_type: 'message', message: 'private-event-token' })))
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(diagnostics.length, 1)
+  assert.equal(diagnostics[0].code, 'QQ_INBOUND_HANDLER_FAILED')
+  assert.equal(JSON.stringify(diagnostics).includes('private-message-token'), false)
+  assert.equal(JSON.stringify(diagnostics).includes('private-event-token'), false)
+  adapter.stop()
 })

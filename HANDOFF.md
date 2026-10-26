@@ -1,6 +1,10 @@
 # amadeus-qq 交接
 
-## 当前检查点（2026-10-26，Owner 目录与媒体边界）
+## 当前检查点（2026-10-26，入站图片读取）
+
+最新代码增加 Enhanced Scene 的 `qq_read_message_image`、两种媒体受限 preset、受控本地 `get_image` 文件读取及固定限频传输诊断。Codex 新增失败回归，原有两个官方 DeepSeek Flash 持久 Creator 会话分别实现媒体模块和 preset/Host 接线，Codex 独立审查。`npm test` 为 121 通过、0 失败、1 跳过；`npm run build` 通过。QA.43 在隔离官方 DSH Desktop 上经真实模型工具调用、image block、硬重启持久性与撤权拒绝测试；QA.44 再次通过真实模型图片调用；最终 QA.45 通过安装和重启加载。Safe Chat 请求头不含图片工具或 Shell。详见 `docs/verification/MEDIA_READ_2026-10-26.md`。隔离 Profile 已恢复 `connect:false`，本机模拟 OneBot 已停止。独立无头 NapCat、真实 QQ 和其他媒体形态仍未验证，PR 保持 Draft，不可部署。
+
+## 上一检查点（2026-10-26，Owner 目录与媒体边界）
 
 分支 `codex/m0-baseline` 和原 Draft PR #1 继续承载 v1.0 开发。原生 Settings GUI 的既有操作已在隔离 DSH Desktop 验收；本轮新增草稿切换保护已完成未保存时重选、跨 Scene 点击和取消后切换的真实 GUI 验收，保存中的切换拦截仍仅有客户端测试。`dsh.search` 的真实模型调用与撤权见 `docs/verification/SEARCH_BOUNDARY_2026-10-26.md`。Owner 私聊逐项授权的好友/群目录已完成真实模型工具调用、撤权及重启测试，见 `docs/verification/DIRECTORY_BOUNDARY_2026-10-26.md`。入站媒体与 `get_msg` 定位信息清洗也经真实模型工具调用，见 `docs/verification/MEDIA_BOUNDARY_2026-10-26.md`。`npm test` 当前 111/111。隔离 Profile 已恢复 `connect: false`，真实 QQ 未连接。通用 Owner Agent、媒体内容读取/发送、空间、Life/State 联动和独立 NapCat 实机兼容仍未完成，PR 不可合并部署。
 

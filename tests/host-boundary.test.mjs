@@ -95,6 +95,10 @@ test('DSH host creates the packaged preset without a per-Agent restriction API',
   assert.deepEqual(await host.createSceneSession({}, { searchAllowed: true }),
     { sessionId: 'new-qq-session', agentPreset: 'amadeus-qq-search' })
   assert.deepEqual(calls.at(-1), { cwd: dir, agentPreset: 'amadeus-qq-search' })
+  assert.deepEqual(await host.createSceneSession({}, { mediaAllowed: true }),
+    { sessionId: 'new-qq-session', agentPreset: 'amadeus-qq-media' })
+  assert.deepEqual(await host.createSceneSession({}, { mediaAllowed: true, searchAllowed: true }),
+    { sessionId: 'new-qq-session', agentPreset: 'amadeus-qq-media-search' })
   const swapped = makeDshHost({ sessionController: {
     create: async () => ({ sessionId: 'unsafe', agentPreset: 'cordis' }),
     prompt: async () => ({ accepted: true }),
@@ -130,6 +134,43 @@ test('host guard denies every non-QQ tool for persisted QQ Session and tool args
   assert.equal((await host.tools.get('qq_connection_status').execute({}, exec)).enabled, true)
   for (const effect of host.effects.reverse()) effect()
   assert.equal(fs.existsSync(`${statePath}.lock`), false)
+})
+
+test('image tool takes only message identity and ordinal, never a model supplied locator', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amadeus-qq-image-tool-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const host = fakeHost()
+  host.ctx.attachments = { saveImage: async () => ({ attachmentId: 'unused' }) }
+  host.ctx.inject = (_services, fn) => fn(host.ctx)
+  apply(host.ctx, {
+    enabled: true, connect: false, statePath: path.join(dir, 'qq.json'),
+    sessionCwd: dir, agentPreset: 'amadeus-qq', mediaRoot: dir,
+    policy: { botIds: ['10001'], privateIds: ['30001'], groupIds: [] },
+  })
+  const imageTool = host.tools.get('qq_read_message_image')
+  assert.ok(imageTool, 'enhanced QQ media reader must be registered')
+  assert.deepEqual(Object.keys(imageTool.parameters.properties).sort(), ['index', 'messageId'])
+  const rendered = imageTool.output.render({}, { attachment: { attachmentId: 'sha256:test', mediaType: 'image/png' } })
+  assert.deepEqual(rendered.map(item => item.type), ['text', 'image'])
+  assert.equal(JSON.stringify(rendered).includes(dir), false)
+  await assert.rejects(imageTool.execute({ messageId: '701', path: 'C:\\private\\secret.png' },
+    { agent: { session: { id: 'unbound' } } }), /unknown QQ tool argument/)
+  for (const effect of host.effects.reverse()) effect()
+})
+
+test('missing attachment injection leaves ordinary QQ text tools available', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amadeus-qq-no-attachments-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const host = fakeHost()
+  host.ctx.inject = () => { throw new Error('optional attachment service absent') }
+  assert.doesNotThrow(() => apply(host.ctx, {
+    enabled: true, connect: false, statePath: path.join(dir, 'qq.json'),
+    sessionCwd: dir, agentPreset: 'amadeus-qq',
+    policy: { botIds: ['10001'], privateIds: ['30001'], groupIds: [] },
+  }))
+  assert.ok(host.tools.has('qq_send_message'))
+  assert.equal(host.tools.has('qq_read_message_image'), false)
+  for (const effect of host.effects.reverse()) effect()
 })
 
 test('connector startup failure emits a bounded diagnostic instead of disappearing', async t => {

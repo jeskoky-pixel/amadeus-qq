@@ -2,10 +2,12 @@ import z from '@deepseek-ai/schemastery'
 
 export const Config = z.object({
   presetGuard: z.boolean().default(false),
+  level: z.natural().max(4).default(1),
   allowSearch: z.boolean().default(false),
   enabled: z.boolean().default(false),
   connect: z.boolean().default(false),
   statePath: z.string().default(''),
+  mediaRoot: z.string().default(''),
   sessionCwd: z.string().default(''),
   agentPreset: z.string().default(''),
   httpUrl: z.string().default(''),

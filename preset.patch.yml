@@ -37,3 +37,36 @@
             config:
               presetGuard: true
               allowSearch: true
+    - id: preset-amadeus-qq-media
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: amadeus-qq-media
+        name: Amadeus QQ Media
+        description: Restricted QQ conversation with an enhanced media read boundary
+        order: 22
+        plugins:
+          - id: qq-media-boundary
+            name: '@amadeus/qq'
+            config:
+              presetGuard: true
+              level: 2
+    - id: preset-amadeus-qq-media-search
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: amadeus-qq-media-search
+        name: Amadeus QQ Media Search
+        description: Restricted QQ conversation with enhanced media read and Host web search
+        order: 23
+        plugins:
+          - id: qq-media-web-search
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              search: true
+              fetch: false
+              searchTimeoutMs: 60000
+          - id: qq-media-search-boundary
+            name: '@amadeus/qq'
+            config:
+              presetGuard: true
+              level: 2
+              allowSearch: true

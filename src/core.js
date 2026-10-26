@@ -191,6 +191,7 @@ export class QQCore {
     const revision = this.#permissionRevision(row ?? {})
     const created = await this.dsh.createSceneSession(scene, {
       searchAllowed: this.#can(scene, 'dsh.search'),
+      mediaAllowed: this.#can(scene, 'qq.media.read'),
     })
     const sessionId = typeof created === 'string' ? created : created?.sessionId
     if (!sessionId) throw new Error('DSH did not return a Session ID')

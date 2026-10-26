@@ -4,6 +4,7 @@ import { QQCore } from './core.js'
 import { OneBotAdapter } from './onebot.js'
 import { acquireInstanceLease } from './lease.js'
 import { CapabilityRegistry } from './capabilities.js'
+import { readMessageImage } from './media.js'
 import { Config } from './config.js'
 import { apply as applyPresetGuard } from './preset-guard.mjs'
 import { ADMIN_PREFIX, createAdminHandler } from './admin-http.js'
@@ -15,7 +16,7 @@ export { Config }
 const QQ_TOOL_NAMES = Object.freeze([
   'qq_send_message', 'qq_wait_for_messages', 'qq_get_unread_messages',
   'qq_mark_read', 'qq_connection_status', 'qq_capability_search',
-  'qq_capability_describe', 'qq_capability_execute',
+  'qq_capability_describe', 'qq_capability_execute', 'qq_read_message_image',
 ])
 const QQ_TOOL_SET = new Set(QQ_TOOL_NAMES)
 const JSON_OBJECT = Object.freeze({ type: 'object', additionalProperties: true })
@@ -28,6 +29,10 @@ function sessionIdOf(exec) {
 
 function registerTool(ctx, definition) {
   const allowed = new Set(Object.keys(definition.parameters?.properties ?? {}))
+  const output = definition.output ?? {
+    schema: JSON_OBJECT,
+    render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
+  }
   ctx.tools.register({
     ...definition,
     execute: async (args, exec) => {
@@ -35,10 +40,7 @@ function registerTool(ctx, definition) {
       for (const key of Object.keys(args)) if (!allowed.has(key)) throw new TypeError(`unknown QQ tool argument: ${key}`)
       return definition.execute(args, exec)
     },
-    output: {
-      schema: JSON_OBJECT,
-      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
-    },
+    output,
   })
 }
 
@@ -67,7 +69,10 @@ export function makeDshHost(ctx, config) {
       }
     },
     async createSceneSession(_scene, grant) {
-      const requestedPreset = grant?.searchAllowed === true ? 'amadeus-qq-search' : config.agentPreset
+      let requestedPreset = config.agentPreset
+      if (grant?.mediaAllowed === true && grant?.searchAllowed === true) requestedPreset = 'amadeus-qq-media-search'
+      else if (grant?.mediaAllowed === true) requestedPreset = 'amadeus-qq-media'
+      else if (grant?.searchAllowed === true) requestedPreset = 'amadeus-qq-search'
       const created = await controller.create({ cwd: config.sessionCwd, agentPreset: requestedPreset })
       if (created?.agentPreset !== requestedPreset) {
         throw new Error('QQ_UNSAFE_PRESET: DSH did not create the requested packaged preset')
@@ -104,12 +109,43 @@ function reportStartupFailure(ctx, stage) {
   }
 }
 
+const TRANSPORT_DIAGNOSTICS = Object.freeze({
+  QQ_INBOUND_HANDLER_FAILED: 'amadeus-qq: inbound QQ event handling failed',
+  QQ_ONEBOT_CONNECT_FAILED: 'amadeus-qq: OneBot connection attempt failed',
+  QQ_ONEBOT_SOCKET_ERROR: 'amadeus-qq: OneBot socket error',
+})
+
+/**
+ * Map an adapter diagnostic code to one static, bounded Host log line. Unknown
+ * codes and any attached detail are ignored; the adapter never supplies event
+ * content, URLs, credentials or paths.
+ * @param {Record<string, unknown>} ctx - plugin context.
+ * @param {{code?: unknown}} diagnostic - adapter diagnostic.
+ */
+function reportTransportDiagnostic(ctx, diagnostic) {
+  const code = diagnostic?.code
+  const message = typeof code === 'string' ? TRANSPORT_DIAGNOSTICS[code] : undefined
+  if (!message) return
+  const level = code === 'QQ_INBOUND_HANDLER_FAILED' ? 'error' : 'warn'
+  try {
+    const logger = ctx?.logger
+    if (logger && typeof logger[level] === 'function') logger[level](message)
+    else if (logger && typeof logger.warn === 'function') logger.warn(message)
+    else console.warn(message)
+  } catch {
+    try { console.warn(message) } catch { /* no available diagnostic sink */ }
+  }
+}
+
 export function apply(ctx, config = {}) {
   // The preset rows mount this same package root with `presetGuard: true`.
   // Branch before any connector startup requirement so the guard is owned by
   // the preset, not by the connector's enabled/statePath configuration.
   if (config.presetGuard === true) {
-    return applyPresetGuard(ctx, { level: 1, allowSearch: config.allowSearch === true })
+    return applyPresetGuard(ctx, {
+      level: config.level ?? 1,
+      allowSearch: config.allowSearch === true,
+    })
   }
   if (config.enabled !== true) {
     ctx.provide('qq', Object.freeze({ getHealth: () => ({ enabled: false, status: 'disabled' }) }))
@@ -128,6 +164,8 @@ export function apply(ctx, config = {}) {
     httpUrl: config.httpUrl,
     wsUrl: config.wsUrl,
     tokenEnv: config.tokenEnv,
+  }, {
+    onDiagnostic: diagnostic => reportTransportDiagnostic(ctx, diagnostic),
   })
   const core = new QQCore({ store, dsh, transport, policy: config.policy, permissionPolicy: config.permissions })
   const capabilities = new CapabilityRegistry({ core, store, transport })
@@ -241,6 +279,49 @@ export function apply(ctx, config = {}) {
     timeoutMs: 20_000,
     execute: (args, exec) => capabilities.execute(sessionIdOf(exec), args.id, args.args ?? {}),
   })
+
+  // Media is optional: wait for the official attachment service without making
+  // it a mandatory connector dependency. A text-only Host simply never gets
+  // this tool; a configured mediaRoot is still required for a successful read.
+  if (typeof ctx.inject === 'function') {
+    let imageToolRegistered = false
+    try { ctx.inject(['attachments'], scope => {
+      const attachments = scope?.attachments ?? ctx.attachments
+      if (imageToolRegistered || !attachments || typeof attachments.saveImage !== 'function') return
+      imageToolRegistered = true
+      registerTool(ctx, {
+        name: 'qq_read_message_image',
+        description: 'Read one image already present in this Session’s bound QQ message, using only the message ID and image ordinal.',
+        parameters: { type: 'object', additionalProperties: false, properties: {
+          messageId: { type: 'string' },
+          index: { type: 'integer', minimum: 0 },
+        }, required: ['messageId'] },
+        output: {
+          schema: JSON_OBJECT,
+          render: (_args, value) => {
+            const blocks = [{ type: 'text', text: 'QQ image loaded as an attachment.' }]
+            if (value?.attachment && typeof value.attachment === 'object') {
+              blocks.push({ type: 'image', attachment: value.attachment })
+            }
+            return blocks
+          },
+        },
+        execute: (args, exec) => readMessageImage({
+          core,
+          store,
+          transport,
+          attachments,
+          mediaRoot: config.mediaRoot,
+          sessionId: sessionIdOf(exec),
+          messageId: args.messageId,
+          index: args.index ?? 0,
+        }),
+      })
+    }) } catch {
+      // Missing optional Host media support must not disable ordinary QQ text.
+      try { ctx.logger?.warn?.('amadeus-qq: image tool unavailable; attachment service could not be injected') } catch { /* optional diagnostic sink */ }
+    }
+  }
 
   ctx.provide('qq', Object.freeze({
     getHealth: () => core.health(),

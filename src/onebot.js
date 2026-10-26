@@ -4,6 +4,7 @@ const SEGMENT_LIMIT = 100
 const EVENT_SIZE_LIMIT = 256 * 1024
 const MEDIA_SEGMENT_TYPES = new Set(['image', 'record', 'video', 'file'])
 const MAX_MEDIA_ID_LENGTH = 256
+const DIAGNOSTIC_INTERVAL_MS = 60_000
 
 function plainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -167,7 +168,27 @@ export class OneBotAdapter {
     this.reconnectTimer = null
     this.retryMs = 1000
     this.onEvent = null
+    this.onDiagnostic = typeof dependencies.onDiagnostic === 'function' ? dependencies.onDiagnostic : null
+    this.diagnosticAt = new Map()
     this.status = 'disabled'
+  }
+
+  /**
+   * Emit one fixed-code diagnostic per bounded interval. Callers pass only a
+   * constant code: exception messages, event bodies, URLs, credentials and
+   * paths never leave the adapter. A diagnostic sink failure cannot affect the
+   * connection or create an unhandled rejection.
+   */
+  #diagnose(code) {
+    if (!this.onDiagnostic) return
+    const now = Date.now()
+    if (now - (this.diagnosticAt.get(code) ?? 0) < DIAGNOSTIC_INTERVAL_MS) return
+    this.diagnosticAt.set(code, now)
+    try {
+      Promise.resolve(this.onDiagnostic(Object.freeze({ code }))).catch(() => {})
+    } catch {
+      // The diagnostic sink is best-effort and must never break transport.
+    }
   }
 
   get token() {
@@ -198,13 +219,22 @@ export class OneBotAdapter {
       this.socket = ws
       ws.on('open', () => { this.status = 'connected'; this.retryMs = 1000 })
       ws.on('message', data => {
+        let event
         try {
           if (data.length > EVENT_SIZE_LIMIT) return
-          const event = JSON.parse(String(data))
-          Promise.resolve(this.onEvent(event)).catch(() => {})
-        } catch { /* malformed platform event cannot stop the connection */ }
+          event = JSON.parse(String(data))
+        } catch {
+          // A malformed platform event is harmless and cannot stop the socket.
+          return
+        }
+        Promise.resolve()
+          .then(() => this.onEvent(event))
+          .catch(() => this.#diagnose('QQ_INBOUND_HANDLER_FAILED'))
       })
-      ws.on('error', () => { this.status = 'disconnected' })
+      ws.on('error', () => {
+        this.status = 'disconnected'
+        this.#diagnose('QQ_ONEBOT_SOCKET_ERROR')
+      })
       ws.on('close', () => {
         if (this.socket === ws) this.socket = null
         this.status = this.stopped ? 'disabled' : 'disconnected'
@@ -212,6 +242,7 @@ export class OneBotAdapter {
       })
     } catch {
       this.status = 'disconnected'
+      this.#diagnose('QQ_ONEBOT_CONNECT_FAILED')
       this.#scheduleReconnect()
     }
   }

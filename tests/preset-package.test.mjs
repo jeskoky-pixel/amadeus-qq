@@ -25,7 +25,8 @@ test('the preset mounts the package root with the guard branch, not an unloadabl
   assert.match(presetPatch, /presetGuard: true/)
   const active = presetPatch.split('\n').filter(line => !line.trim().startsWith('#')).join('\n')
   assert.doesNotMatch(active, /@amadeus\/qq\/preset-guard/)
-  assert.doesNotMatch(active, /^\s+level: /m)
+  const basic = active.split('- id: preset-amadeus-qq-search')[0]
+  assert.doesNotMatch(basic, /^\s+level: /m, 'the basic preset must retain its safe-chat default')
 })
 
 test('a separate search preset uses the existing Host web provider and no persona', () => {
@@ -41,5 +42,9 @@ test('a separate search preset uses the existing Host web provider and no person
   assert.deepEqual(pluginRows.map(row => row.trim()), [
     '- id: preset-amadeus-qq', '- id: qq-tool-boundary',
     '- id: preset-amadeus-qq-search', '- id: qq-web-search', '- id: qq-search-boundary',
+    '- id: preset-amadeus-qq-media', '- id: qq-media-boundary',
+    '- id: preset-amadeus-qq-media-search', '- id: qq-media-web-search', '- id: qq-media-search-boundary',
   ])
+  assert.match(active, /id: amadeus-qq-media[\s\S]*?level: 2/)
+  assert.match(active, /id: amadeus-qq-media-search[\s\S]*?level: 2/)
 })
