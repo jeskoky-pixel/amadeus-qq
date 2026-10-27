@@ -3,6 +3,10 @@ import { test } from 'node:test'
 import {
   DEFAULT_QQ_PERMISSION_LEVEL,
   MAX_QQ_PERMISSION_LEVEL,
+  MEMORY_READ_TOOLS,
+  MEMORY_SCENE_ACL_CONTRACT,
+  MEMORY_SCENE_ACL_SERVICE,
+  MEMORY_SCENE_ACL_VERSION,
   QQ_PERMISSION_LEVELS,
   QQ_TOOL_CONTRACT,
   QQ_TOOL_NAMES,
@@ -12,7 +16,7 @@ import {
 } from '../src/preset-guard.mjs'
 import { OWNER_WORKSPACE_CAPABILITY, OWNER_WORKSPACE_TOOL, providerStatus, resetProviderStatus } from '../src/owner-workspace.js'
 
-function fakeHost(initialSchemas, { restrictError = false } = {}) {
+function fakeHost(initialSchemas, { restrictError = false, emitOnRestrict = false } = {}) {
   const state = {
     guards: [],
     restrictions: [],
@@ -20,6 +24,11 @@ function fakeHost(initialSchemas, { restrictError = false } = {}) {
     listeners: new Map(),
     presented: [],
     effects: [],
+    restrictCalls: 0,
+  }
+  const services = new Map()
+  const emitChange = () => {
+    if (emitOnRestrict) state.listeners.get('tools/change')?.()
   }
   const ctx = {
     tools: {
@@ -33,18 +42,30 @@ function fakeHost(initialSchemas, { restrictError = false } = {}) {
       },
       restrict(filter) {
         if (restrictError) throw new Error('unknown global tool')
+        state.restrictCalls += 1
         const known = new Set(state.schemas.map(schema => schema.name))
         for (const name of [...(filter.allow ?? []), ...(filter.deny ?? [])]) {
           if (!known.has(name)) throw new Error(`unknown global tool "${name}"`)
         }
         state.restrictions.push(filter)
-        return () => {}
+        emitChange()
+        let active = true
+        return () => {
+          if (!active) return
+          active = false
+          emitChange()
+        }
       },
       schemas() {
         return state.schemas
       },
       presentAs(mode) {
         state.presented.push(mode)
+      },
+    },
+    reflect: {
+      get(name) {
+        return services.get(name)
       },
     },
     on(name, fn) {
@@ -55,22 +76,83 @@ function fakeHost(initialSchemas, { restrictError = false } = {}) {
       state.effects.push(fn())
     },
   }
-  return { ctx, state }
+  return { ctx, state, services }
 }
 
-test('connector-disabled Session hides known host tools and still denies execution', () => {
-  const { ctx, state } = fakeHost(['pwsh', 'memory_search', 'web_search'])
+const MEMORY_CAPABILITY = Object.freeze({
+  contract: MEMORY_SCENE_ACL_CONTRACT,
+  version: MEMORY_SCENE_ACL_VERSION,
+  trustedSceneAcl: true,
+  strictQQ: true,
+  tools: MEMORY_READ_TOOLS,
+})
+
+function setMemoryDeclaration(host, declaration = MEMORY_CAPABILITY) {
+  if (declaration === null) {
+    host.services.delete(MEMORY_SCENE_ACL_SERVICE)
+  } else {
+    host.services.set(MEMORY_SCENE_ACL_SERVICE, { sceneAclRead: () => declaration })
+  }
+  return host
+}
+
+function notifyMemoryService(host) {
+  host.state.listeners.get('internal/service')?.(MEMORY_SCENE_ACL_SERVICE)
+}
+
+const exec = (name, args = {}) => ({ name, arguments: args, agent: { session: { id: 'bound' } } })
+const latestAllow = state => state.restrictions.filter(filter => filter.allow).at(-1)?.allow ?? []
+
+test('connector-disabled Session hides host tools and Memory readers without a declaration', () => {
+  const { ctx, state } = fakeHost(['pwsh', 'memory_search', 'memory_list', 'memory_get', 'web_search'])
   apply(ctx, { level: 1 })
   assert.deepEqual(state.presented, ['native'])
   assert.equal(state.guards.length, 1)
   assert.match(state.guards[0]({ name: 'pwsh' }), /non-QQ tools/)
   assert.match(state.guards[0]({}), /non-QQ tools/)
-  assert.match(state.guards[0]({ name: 'memory_search' }), /non-QQ tools/)
+  for (const name of MEMORY_READ_TOOLS) {
+    assert.match(state.guards[0]({ name }), /Memory|non-QQ/i, name)
+  }
   assert.equal(state.guards[0]({ name: 'qq_send_message' }), undefined)
   assert.ok(state.restrictions.some(filter =>
-    filter.deny?.includes('pwsh') && filter.deny?.includes('memory_search')))
+    filter.deny?.includes('pwsh') && filter.deny?.includes('web_search')))
+  assert.ok(state.restrictions.some(filter =>
+    filter.deny?.some(name => MEMORY_READ_TOOLS.includes(name))), 'Memory readers hidden without declaration')
   assert.ok(!state.restrictions.some(filter => filter.allow), 'allow mask waits for the complete QQ tool set')
   assert.equal(state.listeners.has('tools/change'), true)
+  assert.equal(state.listeners.has('internal/service'), true)
+})
+
+test('synchronous tools/change from restrict stays bounded and does not stall activation', () => {
+  const host = fakeHost([...QQ_TOOL_NAMES, ...MEMORY_READ_TOOLS], { emitOnRestrict: true })
+  assert.doesNotThrow(() => apply(host.ctx, { level: 1 }))
+  const afterLoad = host.state.restrictCalls
+  assert.ok(afterLoad <= 20, `startup restrict calls: ${afterLoad}`)
+
+  host.state.listeners.get('tools/change')()
+  assert.ok(host.state.restrictCalls - afterLoad <= 6,
+    `one tools/change must not re-enter restrict: ${host.state.restrictCalls - afterLoad}`)
+
+  host.state.schemas.push({ name: 'pwsh' })
+  host.state.listeners.get('tools/change')()
+  assert.ok(host.state.restrictCalls - afterLoad <= 12,
+    `late non-QQ registration must stay bounded: ${host.state.restrictCalls - afterLoad}`)
+  assert.match(host.state.guards[0](exec('memory_search')), /Memory|non-QQ/i)
+  assert.match(host.state.guards[0](exec('pwsh')), /non-QQ tools/)
+})
+
+test('a declared trusted Scene ACL contract opens exactly the three Memory readers', () => {
+  const host = fakeHost([...QQ_TOOL_NAMES, ...MEMORY_READ_TOOLS, 'pwsh'])
+  setMemoryDeclaration(host)
+  apply(host.ctx, { level: 1 })
+  const guard = host.state.guards[0]
+  const allow = latestAllow(host.state)
+  for (const name of MEMORY_READ_TOOLS) {
+    assert.equal(guard(exec(name)), undefined, name)
+    assert.ok(allow.includes(name), `${name} must be visible`)
+  }
+  assert.match(guard(exec('pwsh')), /non-QQ tools/)
+  assert.equal(allow.includes('pwsh'), false)
 })
 
 test('visible restriction becomes the QQ allow list once the connector registers tools', () => {
@@ -202,7 +284,260 @@ function withCapabilities(host, capabilities) {
   return host
 }
 
-const exec = (name, args = {}) => ({ name, arguments: args, agent: { session: { id: 'bound' } } })
+test('ordinary QQ presets expose exactly the Scene-scoped Memory readers when the contract is present', () => {
+  const deniedMemoryTools = [
+    'memory_save', 'memory_update', 'memory_delete', 'memory_forget', 'memory_archive',
+    'memory_register_document', 'memory_organize', 'memory_runtime', 'memory_core_save',
+    'memory_preference_get', 'memory_identity_lookup', 'memory_scope_set', 'memory_future_tool',
+  ]
+  for (const level of [0, 1, 2, 3]) {
+    const host = fakeHost([...QQ_TOOL_NAMES, ...MEMORY_READ_TOOLS, ...deniedMemoryTools, 'pwsh'])
+    setMemoryDeclaration(host)
+    apply(host.ctx, { level })
+    const guard = host.state.guards[0]
+    const allow = latestAllow(host.state)
+    for (const name of MEMORY_READ_TOOLS) {
+      // Model arguments such as `scenes` are forwarded to Memory; they are not
+      // an authorization input here. Memory narrows/filters them server-side.
+      assert.equal(guard(exec(name, { scenes: ['qq:group:10001:20002'] })), undefined,
+        `level ${level} ${name} must be callable`)
+      assert.ok(allow.includes(name), `level ${level} ${name} must be visible`)
+    }
+    for (const name of deniedMemoryTools) {
+      assert.match(guard(exec(name)), /non-QQ|Memory/i, `level ${level} ${name} must be denied`)
+      assert.equal(allow.includes(name), false, `level ${level} ${name} must stay hidden`)
+    }
+    assert.match(guard(exec('pwsh')), /non-QQ tools/, `level ${level} pwsh must be denied`)
+    assert.equal(allow.includes('pwsh'), false, `level ${level} pwsh must stay hidden`)
+    assert.deepEqual([...allow].sort(), [...toolsForLevel(level), ...MEMORY_READ_TOOLS].sort(),
+      `level ${level} mask must contain only the QQ contract and the three Memory readers`)
+  }
+})
+
+test('without the Memory declaration the readers stay denied and hidden at every ordinary level', () => {
+  for (const level of [0, 1, 2, 3]) {
+    const host = fakeHost([...QQ_TOOL_NAMES, ...MEMORY_READ_TOOLS, 'pwsh'])
+    apply(host.ctx, { level })
+    const guard = host.state.guards[0]
+    const allow = latestAllow(host.state)
+    for (const name of MEMORY_READ_TOOLS) {
+      assert.match(guard(exec(name)), /Memory|non-QQ/i, `level ${level} ${name} must fail closed`)
+      assert.equal(allow.includes(name), false, `level ${level} ${name} must stay hidden`)
+    }
+    assert.ok(host.state.restrictions.some(filter =>
+      filter.deny?.some(name => MEMORY_READ_TOOLS.includes(name))),
+    `level ${level} must install a visibility deny for the readers`)
+  }
+})
+
+test('search-enabled ordinary QQ presets also expose the three Memory readers with the contract', () => {
+  const host = fakeHost([...QQ_TOOL_NAMES, ...MEMORY_READ_TOOLS, 'web_search', 'pwsh'])
+  setMemoryDeclaration(host)
+  apply(host.ctx, { level: 1, allowSearch: true })
+  const allow = latestAllow(host.state)
+  for (const name of MEMORY_READ_TOOLS) assert.ok(allow.includes(name), name)
+  assert.ok(allow.includes('web_search'))
+  assert.match(host.state.guards[0](exec('pwsh')), /non-QQ tools/)
+})
+
+test('preset-row declarations cannot widen or re-scope the Memory tool set', () => {
+  const forged = {
+    level: 1,
+    memoryTools: ['memory_save', 'memory_delete'],
+    allowedTools: ['memory_save'],
+    allowMemoryWrites: true,
+    scenes: ['qq:group:10001:20002'],
+    scene: 'qq:group:10001:20002',
+    memorySceneAcl: { trustedSceneAcl: true, tools: MEMORY_READ_TOOLS },
+  }
+  const policy = resolveQQPermissionPolicy(forged)
+  assert.deepEqual(policy.tools.filter(name => name.startsWith('memory_')), [],
+    'the static preset policy never contains Memory tools')
+
+  const bare = fakeHost([...QQ_TOOL_NAMES, ...MEMORY_READ_TOOLS, 'memory_save', 'pwsh'])
+  apply(bare.ctx, forged)
+  for (const name of MEMORY_READ_TOOLS) {
+    assert.match(bare.state.guards[0](exec(name)), /Memory|non-QQ/i,
+      'a preset-row field cannot substitute for the live service declaration')
+    assert.equal(latestAllow(bare.state).includes(name), false)
+  }
+
+  const host = fakeHost([...QQ_TOOL_NAMES, ...MEMORY_READ_TOOLS, 'memory_save', 'memory_delete', 'pwsh'])
+  setMemoryDeclaration(host)
+  apply(host.ctx, forged)
+  const guard = host.state.guards[0]
+  const allow = latestAllow(host.state)
+  for (const name of ['memory_save', 'memory_delete']) {
+    assert.match(guard(exec(name, { scenes: ['qq:private:10001:30001'] })), /non-QQ|Memory/i)
+    assert.equal(allow.includes(name), false)
+  }
+  for (const name of MEMORY_READ_TOOLS) assert.equal(guard(exec(name)), undefined)
+})
+
+test('Memory tools registered after preset start stay hidden until the contract is declared', () => {
+  const host = fakeHost([...QQ_TOOL_NAMES, 'pwsh'])
+  apply(host.ctx, { level: 1 })
+  const guard = host.state.guards[0]
+  let allow = latestAllow(host.state)
+  for (const name of MEMORY_READ_TOOLS) assert.equal(allow.includes(name), false, name)
+
+  host.state.schemas.push({ name: 'memory_search' }, { name: 'memory_save' })
+  host.state.listeners.get('tools/change')()
+  assert.match(guard(exec('memory_search')), /Memory|non-QQ/i)
+  assert.equal(latestAllow(host.state).includes('memory_search'), false)
+
+  // A reader registered after the first deny must also be covered.
+  host.state.schemas.push({ name: 'memory_list' }, { name: 'memory_get' }, { name: 'memory_delete' })
+  host.state.listeners.get('tools/change')()
+  allow = latestAllow(host.state)
+  for (const name of MEMORY_READ_TOOLS) {
+    assert.equal(allow.includes(name), false, `${name} must stay hidden without the declaration`)
+    assert.match(guard(exec(name)), /Memory|non-QQ/i, `${name} must stay denied without the declaration`)
+  }
+
+  setMemoryDeclaration(host)
+  notifyMemoryService(host)
+  allow = latestAllow(host.state)
+  for (const name of MEMORY_READ_TOOLS) {
+    assert.ok(allow.includes(name), `${name} must become visible after the declaration`)
+    assert.equal(guard(exec(name)), undefined, `${name} must become callable after the declaration`)
+  }
+  for (const name of ['memory_save', 'memory_delete']) {
+    assert.equal(allow.includes(name), false, `${name} must stay hidden`)
+    assert.match(guard(exec(name)), /non-QQ|Memory/i, `${name} must stay denied`)
+  }
+})
+
+test('a QQ Host service change refreshes the Memory declaration gate', () => {
+  const host = fakeHost([...QQ_TOOL_NAMES, ...MEMORY_READ_TOOLS, 'pwsh'])
+  apply(host.ctx, { level: 1 })
+  for (const name of MEMORY_READ_TOOLS) {
+    assert.match(host.state.guards[0](exec(name)), /Memory|non-QQ/i)
+  }
+  setMemoryDeclaration(host)
+  host.state.listeners.get('internal/service')?.('qq')
+  const allow = latestAllow(host.state)
+  for (const name of MEMORY_READ_TOOLS) {
+    assert.equal(host.state.guards[0](exec(name)), undefined, name)
+    assert.ok(allow.includes(name), name)
+  }
+})
+
+test('malformed, old or incomplete Memory declarations fail closed', () => {
+  const declarations = [
+    null,
+    false,
+    {},
+    { ...MEMORY_CAPABILITY, contract: 'amadeus-memory/legacy' },
+    { ...MEMORY_CAPABILITY, version: 0 },
+    { ...MEMORY_CAPABILITY, trustedSceneAcl: false },
+    { ...MEMORY_CAPABILITY, strictQQ: false },
+    { ...MEMORY_CAPABILITY, tools: ['memory_search'] },
+    { ...MEMORY_CAPABILITY, tools: 'memory_search,memory_list,memory_get' },
+  ]
+  for (const declaration of declarations) {
+    const host = fakeHost([...QQ_TOOL_NAMES, ...MEMORY_READ_TOOLS, 'pwsh'])
+    if (declaration === null) {
+      host.services.delete(MEMORY_SCENE_ACL_SERVICE)
+    } else {
+      host.services.set(MEMORY_SCENE_ACL_SERVICE, { sceneAclRead: () => declaration })
+    }
+    apply(host.ctx, { level: 1 })
+    for (const name of MEMORY_READ_TOOLS) {
+      assert.match(host.state.guards[0](exec(name)), /Memory|non-QQ/i,
+        `${JSON.stringify(declaration)} must not open ${name}`)
+      assert.equal(latestAllow(host.state).includes(name), false)
+    }
+  }
+
+  const throwing = fakeHost([...QQ_TOOL_NAMES, ...MEMORY_READ_TOOLS, 'pwsh'])
+  throwing.services.set(MEMORY_SCENE_ACL_SERVICE, {
+    sceneAclRead() { throw new Error('declaration unavailable') },
+  })
+  apply(throwing.ctx, { level: 1 })
+  for (const name of MEMORY_READ_TOOLS) {
+    assert.match(throwing.state.guards[0](exec(name)), /Memory|non-QQ/i)
+  }
+
+  const hostile = fakeHost([...QQ_TOOL_NAMES, ...MEMORY_READ_TOOLS, 'pwsh'])
+  hostile.services.set(MEMORY_SCENE_ACL_SERVICE, {
+    sceneAclRead: () => new Proxy({}, {
+      get() { throw new Error('hostile declaration') },
+    }),
+  })
+  apply(hostile.ctx, { level: 1 })
+  for (const name of MEMORY_READ_TOOLS) {
+    assert.match(hostile.state.guards[0](exec(name)), /Memory|non-QQ/i)
+  }
+})
+
+test('withdrawing the declaration closes and hides the readers again', () => {
+  const host = fakeHost([...QQ_TOOL_NAMES, ...MEMORY_READ_TOOLS, 'pwsh'])
+  setMemoryDeclaration(host)
+  apply(host.ctx, { level: 1 })
+  const guard = host.state.guards[0]
+  for (const name of MEMORY_READ_TOOLS) assert.equal(guard(exec(name)), undefined)
+
+  host.services.delete(MEMORY_SCENE_ACL_SERVICE)
+  notifyMemoryService(host)
+  const allow = latestAllow(host.state)
+  for (const name of MEMORY_READ_TOOLS) {
+    assert.match(guard(exec(name)), /Memory|non-QQ/i, `${name} must close immediately`)
+    assert.equal(allow.includes(name), false, `${name} must be hidden again`)
+  }
+
+  setMemoryDeclaration(host)
+  notifyMemoryService(host)
+  const reopened = latestAllow(host.state)
+  for (const name of MEMORY_READ_TOOLS) {
+    assert.equal(guard(exec(name)), undefined, `${name} must reopen`)
+    assert.ok(reopened.includes(name), `${name} must be visible again`)
+  }
+})
+
+test('Memory readers present before the QQ connector appear with it when the contract is present', () => {
+  const host = fakeHost([...MEMORY_READ_TOOLS, 'pwsh'])
+  setMemoryDeclaration(host)
+  apply(host.ctx, { level: 1 })
+  assert.equal(host.state.restrictions.some(filter => filter.allow), false,
+    'the allow mask waits for the QQ connector tools, not for Memory')
+  for (const name of MEMORY_READ_TOOLS) assert.equal(host.state.guards[0](exec(name)), undefined)
+
+  host.state.schemas.push(...QQ_TOOL_NAMES.map(name => ({ name })))
+  host.state.listeners.get('tools/change')()
+  const allow = latestAllow(host.state)
+  for (const name of MEMORY_READ_TOOLS) assert.ok(allow.includes(name), `${name} must be visible`)
+  assert.equal(allow.includes('pwsh'), false)
+})
+
+test('level 4 keeps the existing generic Owner host-tool path for Memory', () => {
+  const { ctx, state } = fakeHost([
+    ...QQ_TOOL_NAMES, 'memory_search', 'memory_save', 'memory_delete', 'pwsh',
+  ])
+  let owner = true
+  ctx.get = name => name === 'qq'
+    ? {
+      resolveTrustedSessionScene: () => ({ admin: owner }),
+      authorizeSessionCapability: (_id, capability) => capability === 'qq.owner.tools',
+    }
+    : undefined
+  apply(ctx, { level: 4 })
+  const call = name => ({ name, agent: { session: { id: 'owner-session' } } })
+  // Owner already reaches every registered host tool through the generic path;
+  // this change must not narrow that path.
+  for (const name of ['memory_search', 'memory_save', 'memory_delete', 'pwsh']) {
+    assert.equal(state.guards[0](call(name)), undefined, name)
+  }
+  owner = false
+  for (const name of ['memory_search', 'memory_save', 'memory_delete', 'pwsh']) {
+    assert.match(state.guards[0](call(name)), /owner native|non-QQ/i, name)
+  }
+
+  // The same Memory write tools remain closed to an ordinary preset.
+  const ordinary = fakeHost([...QQ_TOOL_NAMES, 'memory_save', 'pwsh'])
+  apply(ordinary.ctx, { level: 1 })
+  assert.match(ordinary.state.guards[0](exec('memory_save')), /non-QQ|Memory/i)
+})
 
 test('Safe Chat cannot execute media, file, QZone or Owner workspace tools', () => {
   const { ctx, state } = withCapabilities(fakeHost([
@@ -296,7 +631,9 @@ test('Owner workspace is allowlisted only at level 4 and still needs the dedicat
 })
 
 test('registered DSH tools are visible and executable only for a verified level-4 Owner Session', () => {
-  const { ctx, state } = fakeHost([...QQ_TOOL_NAMES, 'pwsh', 'read', 'write', 'glob', 'grep', 'web_search', 'web_fetch', 'memory_search', 'github_search'])
+  // Memory readers are the bounded exception covered by the tests above; this
+  // test keeps the remaining native/Dynamic host tools Owner-only.
+  const { ctx, state } = fakeHost([...QQ_TOOL_NAMES, 'pwsh', 'read', 'write', 'glob', 'grep', 'web_search', 'web_fetch', 'github_search'])
   let owner = true
   ctx.get = name => name === 'qq'
     ? {
@@ -306,13 +643,13 @@ test('registered DSH tools are visible and executable only for a verified level-
     : undefined
   apply(ctx, { level: 4 })
   const exec = name => ({ name, agent: { session: { id: 'owner-session' } } })
-  for (const name of ['pwsh', 'read', 'write', 'glob', 'grep', 'web_fetch', 'web_search', 'memory_search', 'github_search']) {
+  for (const name of ['pwsh', 'read', 'write', 'glob', 'grep', 'web_fetch', 'web_search', 'github_search']) {
     assert.equal(state.guards[0](exec(name)), undefined, name)
   }
   assert.match(state.guards[0](exec('not_installed')), /non-QQ tools/)
   assert.match(state.guards[0](exec('qq_unlisted_send')), /non-QQ tools/)
   const allow = state.restrictions.find(filter => filter.allow)?.allow ?? []
-  for (const name of ['pwsh', 'read', 'write', 'glob', 'grep', 'web_fetch', 'web_search', 'memory_search', 'github_search']) {
+  for (const name of ['pwsh', 'read', 'write', 'glob', 'grep', 'web_fetch', 'web_search', 'github_search']) {
     assert.ok(allow.includes(name), `${name} must be visible`)
   }
   state.schemas.push({ name: 'github_issue_create' })

@@ -21,7 +21,12 @@ import {
   setOwnerWorkspaceStatus,
 } from './owner-workspace.js'
 import { Config } from './config.js'
-import { apply as applyPresetGuard, OWNER_NATIVE_TOOLS } from './preset-guard.mjs'
+import {
+  apply as applyPresetGuard,
+  isMemoryReadTool,
+  memorySceneAclReadGranted,
+  OWNER_NATIVE_TOOLS,
+} from './preset-guard.mjs'
 import { ADMIN_PREFIX, createAdminHandler } from './admin-http.js'
 
 export const name = 'amadeus-qq'
@@ -259,6 +264,20 @@ export function apply(ctx, config = {}) {
     const sid = exec?.agent?.session?.id
     if (typeof sid !== 'string' || !store.isKnownSession(sid)) return undefined
     if (QQ_TOOL_SET.has(exec.name)) return undefined
+    // Memory readers are not admitted by name. Ordinary QQ Sessions need the
+    // explicit trusted-Scene ACL declaration from Amadeus Memory; an old or
+    // upstream Mneme without it stays closed. The Owner private capability
+    // keeps its pre-existing generic host-tool path unchanged.
+    if (isMemoryReadTool(exec.name)) {
+      let ownerAuthorized = false
+      try {
+        ownerAuthorized = core.authorizeSessionCapability(sid, 'qq.owner.tools') === true
+      } catch { /* fail closed for the ordinary path */ }
+      if (ownerAuthorized) return undefined
+      return memorySceneAclReadGranted(ctx)
+        ? undefined
+        : 'QQ Memory trusted Scene ACL read contract is unavailable'
+    }
     if (exec.name === 'web_search') {
       return core.authorizeSessionCapability(sid, 'dsh.search')
         ? undefined
