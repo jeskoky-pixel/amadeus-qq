@@ -1,0 +1,230 @@
+{
+  "schemaVersion": 1,
+  "kind": "historical_tool_metadata_only",
+  "capturedDate": "2026-10-25",
+  "backend": "SnowLuma 2.1.1",
+  "source": {
+    "fileAlias": "production-qq-tool-log",
+    "snapshotSha256": "3bddd658d47dbe20af65e66d6e4b1bdcd771ddf487edf731b7544a7c0ab58045",
+    "lineCount": 765
+  },
+  "redaction": {
+    "dropped": [
+      "all text and tool result bodies",
+      "account and scene identifiers",
+      "session identifiers",
+      "tokens and credentials",
+      "URLs and file paths",
+      "exact wall-clock timestamps"
+    ],
+    "mappingPublished": false
+  },
+  "limitations": [
+    "No new real-platform messages sent during M0.",
+    "ok=true is the bridge log result only; platform delivery confirmation and message arrival timing are not established.",
+    "Tool args and results are removed. Wait results do not prove a new message arrived.",
+    "Events share one pseudonymized source session; this does not prove cross-scene isolation."
+  ],
+  "events": [
+    {
+      "ordinal": 1,
+      "sourceLine": 727,
+      "elapsedMs": 0,
+      "phase": "call",
+      "tool": "mcp__snowluma__qq_send_message",
+      "sceneAlias": "scene-A",
+      "sessionAlias": "session-A"
+    },
+    {
+      "ordinal": 2,
+      "sourceLine": 728,
+      "elapsedMs": 3504,
+      "phase": "result",
+      "tool": "mcp__snowluma__qq_send_message",
+      "sceneAlias": "scene-A",
+      "sessionAlias": "session-A",
+      "ok": true,
+      "hasError": false
+    },
+    {
+      "ordinal": 3,
+      "sourceLine": 729,
+      "elapsedMs": 5850,
+      "phase": "call",
+      "tool": "mcp__snowluma__qq_wait_for_messages",
+      "sceneAlias": "scene-A",
+      "sessionAlias": "session-A"
+    },
+    {
+      "ordinal": 4,
+      "sourceLine": 730,
+      "elapsedMs": 46236,
+      "phase": "result",
+      "tool": "mcp__snowluma__qq_wait_for_messages",
+      "sceneAlias": "scene-A",
+      "sessionAlias": "session-A",
+      "ok": true,
+      "hasError": false
+    },
+    {
+      "ordinal": 5,
+      "sourceLine": 731,
+      "elapsedMs": 60253,
+      "phase": "call",
+      "tool": "mcp__snowluma__qq_send_message",
+      "sceneAlias": "scene-A",
+      "sessionAlias": "session-A"
+    },
+    {
+      "ordinal": 6,
+      "sourceLine": 732,
+      "elapsedMs": 60716,
+      "phase": "result",
+      "tool": "mcp__snowluma__qq_send_message",
+      "sceneAlias": "scene-A",
+      "sessionAlias": "session-A",
+      "ok": true,
+      "hasError": false
+    },
+    {
+      "ordinal": 7,
+      "sourceLine": 733,
+      "elapsedMs": 80111,
+      "phase": "call",
+      "tool": "mcp__snowluma__qq_wait_for_messages",
+      "sceneAlias": "scene-A",
+      "sessionAlias": "session-A"
+    },
+    {
+      "ordinal": 8,
+      "sourceLine": 737,
+      "elapsedMs": 260200,
+      "phase": "result",
+      "tool": "mcp__snowluma__qq_wait_for_messages",
+      "sceneAlias": "scene-A",
+      "sessionAlias": "session-A",
+      "ok": true,
+      "hasError": false
+    },
+    {
+      "ordinal": 9,
+      "sourceLine": 740,
+      "elapsedMs": 281177,
+      "phase": "call",
+      "tool": "mcp__snowluma__qq_memory_append",
+      "sceneAlias": "scene-A",
+      "sessionAlias": "session-A"
+    },
+    {
+      "ordinal": 10,
+      "sourceLine": 741,
+      "elapsedMs": 281198,
+      "phase": "result",
+      "tool": "mcp__snowluma__qq_memory_append",
+      "sceneAlias": "scene-A",
+      "sessionAlias": "session-A",
+      "ok": true,
+      "hasError": false
+    },
+    {
+      "ordinal": 11,
+      "sourceLine": 742,
+      "elapsedMs": 283949,
+      "phase": "call",
+      "tool": "mcp__snowluma__qq_wait_for_messages",
+      "sceneAlias": "scene-A",
+      "sessionAlias": "session-A"
+    },
+    {
+      "ordinal": 12,
+      "sourceLine": 743,
+      "elapsedMs": 398094,
+      "phase": "result",
+      "tool": "mcp__snowluma__qq_wait_for_messages",
+      "sceneAlias": "scene-A",
+      "sessionAlias": "session-A",
+      "ok": true,
+      "hasError": false
+    },
+    {
+      "ordinal": 13,
+      "sourceLine": 744,
+      "elapsedMs": 410697,
+      "phase": "call",
+      "tool": "mcp__snowluma__qq_send_message",
+      "sceneAlias": "scene-A",
+      "sessionAlias": "session-A"
+    },
+    {
+      "ordinal": 14,
+      "sourceLine": 745,
+      "elapsedMs": 413575,
+      "phase": "result",
+      "tool": "mcp__snowluma__qq_send_message",
+      "sceneAlias": "scene-A",
+      "sessionAlias": "session-A",
+      "ok": true,
+      "hasError": false
+    },
+    {
+      "ordinal": 15,
+      "sourceLine": 746,
+      "elapsedMs": 429777,
+      "phase": "call",
+      "tool": "mcp__snowluma__qq_wait_for_messages",
+      "sceneAlias": "scene-A",
+      "sessionAlias": "session-A"
+    },
+    {
+      "ordinal": 16,
+      "sourceLine": 747,
+      "elapsedMs": 609931,
+      "phase": "result",
+      "tool": "mcp__snowluma__qq_wait_for_messages",
+      "sceneAlias": "scene-A",
+      "sessionAlias": "session-A",
+      "ok": true,
+      "hasError": false
+    },
+    {
+      "ordinal": 17,
+      "sourceLine": 748,
+      "elapsedMs": 613617,
+      "phase": "call",
+      "tool": "mcp__snowluma__qq_wait_for_messages",
+      "sceneAlias": "scene-A",
+      "sessionAlias": "session-A"
+    },
+    {
+      "ordinal": 18,
+      "sourceLine": 749,
+      "elapsedMs": 913819,
+      "phase": "result",
+      "tool": "mcp__snowluma__qq_wait_for_messages",
+      "sceneAlias": "scene-A",
+      "sessionAlias": "session-A",
+      "ok": true,
+      "hasError": false
+    },
+    {
+      "ordinal": 19,
+      "sourceLine": 750,
+      "elapsedMs": 917449,
+      "phase": "call",
+      "tool": "mcp__snowluma__qq_mark_read",
+      "sceneAlias": "scene-A",
+      "sessionAlias": "session-A"
+    },
+    {
+      "ordinal": 20,
+      "sourceLine": 751,
+      "elapsedMs": 917470,
+      "phase": "result",
+      "tool": "mcp__snowluma__qq_mark_read",
+      "sceneAlias": "scene-A",
+      "sessionAlias": "session-A",
+      "ok": true,
+      "hasError": false
+    }
+  ]
+}

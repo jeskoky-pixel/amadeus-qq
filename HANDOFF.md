@@ -1,6 +1,74 @@
 # amadeus-qq 交接
 
-记录日期：2026-10-24（Asia/Shanghai）。
+## 当前检查点（2026-10-27，真实群聊/附件、Web Console 与最终质量门禁）
+
+真实 NapCat/QQ 的授权范围已扩展到仅含 Owner 与测试 Bot 的一个群：隔离官方 DSH 模型实际调用 @+face、回复、回应、戳一戳和群附件发送，均返回 `delivered`；NapCat `get_msg` 复核到 @、face、reply 段，群文件根目录确认一个上传文件。NapCat 会轮换群文件 `file_id`，最终代码改以稳定元数据和文件计数核对，歧义保留 unknown；最终包与隔离 Desktop 重启后的新群附件返回 delivered，平台恰有一个匹配文件并经 `get_group_file_url` 解析回执，列表 ID 与上传时不同。旧 unknown 上传没有被重试或改写。真实浏览器已加载最终包的 Web Console，显示群/私聊/Bot/已观察 QQ ID 场景图，节点点击、筛选和重置可用，owner admission、CSP 与权限编辑器保留；在停用 Memory Bundle 的隔离 Desktop 中同样通过，确认运行时不依赖 Memory。窄屏由横向滚动及更窄时的列表回退处理，未做移动端视觉回归。Memory 同 Host 以合成标记和真实绑定 Session 验证精确查询命中私聊标记、无跨 Scene 注入，但宽泛查询未召回，不能宣称检索完备。Life 受控外发已独立验证：模型工具创建的 intent 持久化 `life-tool:session:<当前 Owner Session>` provenance；管理员对同一 allowlist Owner Session 与授权 QQ 私聊启用 `externalMessageSessionIds` 后，wake 执行，模型恰好一次调用 `qq_send_message`，QQ 返回 delivered，NapCat `get_msg` 与指定 Owner 好友历史确认 Bot 私有文字。首次尝试曾因错误 provenance 检查未发送，Life 源码改为读取持久 intent，而非 wake/binding 授权；关闭 opt-in 后新工具授权 intent 的 wake 使用显式非发送提示，模型零次 QQ 发送。该 opt-in 只改变提示指导，不是 Life 级硬闸门，QQ Scene 执行权限仍是权威；长期自治与任意 QQ 目标未验证。`npm test` 为 264 通过、0 失败、4 跳过（均为 Windows 符号链接不可用），构建、打包与 `git diff --check` 通过。完整证据见[最终验收记录](docs/verification/V1_REAL_NAPCAT_2026-10-27.md)与[收缩版范围](docs/V1_SCOPE.md)。PR #1 保持 Draft；生产前先备份独立状态、小范围灰度，unknown 只人工对账，回滚停用 Bundle 并恢复隔离备份。
+
+## 上一检查点（2026-10-27，v1.0 定向收尾）
+
+在原 `codex/m0-baseline` 和 Draft PR #1 上修复 Owner 动态 Host 工具被 QQ Connector 全局 guard 错误拒绝的问题，并补入站 `get_image`/`get_file` 有界响应回归。`npm test` 为 256 通过、0 失败、4 跳过，构建及 `git diff --check` 通过。隔离官方 DSH Desktop 实际调用 `life_intent_create`、`web_fetch`；Life wake 后调用 QQ 当前 Scene 只读工具并留下 `executed` 记录，管理 API 撤权后旧 Owner Session 再调用 `web_fetch` 被拒。QQ+Memory 在同一 Host 中的合成群 A、群 B、私聊上下文互相隔离。QQ/Life Bundle 已停用，隔离 QA Profile 和 QQ 合成状态已恢复，测试 NapCat 保持停止。真实 QQ 的核心收发、头像/签名、QQ 空间证据仍见[最终验收记录](docs/verification/V1_REAL_NAPCAT_2026-10-27.md)；新媒体内联分支仅有模拟证据。未完成的实机边界见[范围清单](docs/V1_SCOPE.md)。PR 继续 Draft，不自动合并或部署。
+
+## 最新检查点（2026-10-27，真实 NapCat/QQ 与 v1.0 收尾）
+
+当前候选已通过 253 项测试、0 失败、4 跳过，构建与差异检查通过。隔离 DSH 模型实际调用 Owner 的 `pwsh`/`read`、QQ 原生 ASR、私聊发送、账号资料与 QQ 空间工具；真实 NapCat 私聊文字/图片/语音收发、`fetch_ptt_text`、头像/签名修改及恢复、仅自己可见说说发布和删除也已验证。重启后相同私聊与空间 `actionId` 去重有效。最终安装包在隔离 Desktop 硬重启加载，最小同源 Web Console 的真实 Host HTTP 路由、匿名拒绝与 CSP 已通过；尚未人工操作页面。当前隔离 QQ 插件停用、`connect:false`，测试 NapCat 已停止，原生产 SnowLuma 配置未改。完整证据与未验收边界见[最终验收记录](docs/verification/V1_REAL_NAPCAT_2026-10-27.md)，最新剩余清单见[收缩版 v1.0 范围](docs/V1_SCOPE.md)。PR #1 保持 Draft，不自动合并部署。以下为历史检查点。
+
+## 最新检查点（2026-10-27，M2–M5 集中隔离验收）
+
+原 Draft PR #1 的开发分支 codex/m0-baseline 已加入媒体发送/上传、可选 QZone Provider、账号资料、受控 Owner 工作区、群管理和相应权限/可靠性回归。Codex 独立 npm test 为 225 通过、0 失败、4 跳过；构建与差异检查通过。官方 DSH Desktop 隔离 Profile 安装 0.1.0-qa.final，真实模型工具调用、本机模拟 OneBot、平台拒绝、撤权、硬重启去重和 Owner 工具重启后读取通过。精确证据、包 hash、边界与回滚建议见 [集中隔离验收](docs/verification/M2_M5_ISOLATED_DESKTOP_2026-10-27.md)。Profile 已恢复 connect:false，模拟 OneBot 已停止；未连接真实 QQ 或生产 Profile。用户已指示暂缓新增 GUI 开发，保留已有 Settings 页面，可能后续改为 Web UI。不要把下方历史检查点当作当前代码状态。
+
+## 当前 M3 开发检查点（2026-10-27，NapCat 安装源码核查与媒体读取）
+
+只读核查了本机安装的 NapCat 核心 `napcat.mjs`：`get_record` 的 `out_format` 列表与本地 file/base64 返回路径已确认；外部 FFmpeg 分支没有保证 WAV 为 16 kHz，故本地 ASR 新增结构完整的非 16 kHz PCM16 WAV 转码。`get_file` 的 file/file_id 与 file/url/可选 base64 契约也已核实，但独立无头实例未确认正在运行，没有调用真实 QQ API。详情见 `docs/verification/LOCAL_NAPCAT_INTERFACE_2026-10-27.md`。
+
+原核心和媒体 DSH Creator 会话合批实现群精华/荣誉只读投影、当前 Scene 持久消息的文件/视频读取；Codex 审查后为群读取补上 JSON 解析前 128 KiB 响应上限。文件/视频只允许受控本地路径或有界内联字节，模型不提供任意路径/URL。当前 `npm test` 为 161 通过、0 失败、3 跳过；构建与 diff check 通过。这些新增能力尚未做集中 DSH Desktop 安装、模型调用和重启验收；现有 M1/权限/GUI 验收仍有效。下一步主线是 M2–M5 的媒体发送、QQ 空间、Owner Agent 实际权限和生态联动，不再对每个小修改重复 Desktop 验收。PR #1 保持 Draft，不可部署。
+
+## 当前开发检查点（2026-10-27，合批开发，Desktop 验收待完成）
+
+继续复用三个隔离官方 DeepSeek Flash Creator 会话，由 Codex 先写失败回归、DSH 按核心/媒体/GUI 文件范围修复、Codex 复审。发送账本增加仅认证 Owner 可用的 unknown 投递人工对账：在途、已送达和非 unknown 状态不能标失败；Settings 必须输入同 Scene 的完整 actionId 才允许操作，且不自动重发。能力拒绝原因已有固定说明。语音读取增加显式 `ffmpegPath` 的本地 MP3→canonical WAV 路径；Codex 在本机真实 ffmpeg 上跑通合成 MP3 单元测试。`npm test` 为 145 通过、0 失败、2 项 Windows 符号链接跳过；构建与 `git diff --check` 通过。当前更改还未进行合批 DSH Desktop 安装、GUI 操作和重启验收；真实独立 NapCat 与 QQ 仍未连接。PR #1 保持 Draft，不可部署。后续应合并更多既定 v1.0 能力后集中做一次隔离 Desktop 验收，避免每个小修反复打包重启。
+
+## 当前检查点（2026-10-26，QA.49 可靠性与内联语音）
+
+原三个持久官方 DeepSeek Flash Creator 会话继续复用。Codex 的失败回归推动了 `unknown` 投递同内容新 `actionId` 的持久原子拦截、OneBot 有界内联 canonical WAV 读取，以及管理 API/GUI 错误归因；Codex 复审后补修未知 403 的保守只读规则。`npm test` 为 139 通过、0 失败、2 项 Windows 符号链接跳过。QA.49 官方隔离 DSH Desktop 通过真实模型工具调用、本机模拟 OneBot 内联合成 WAV、官方 SenseVoice 转写、撤权拒绝和重启后 Safe Chat 持久性；详见 `docs/verification/QA49_RELIABILITY_INLINE_AUDIO_GUI_2026-10-26.md`。隔离 Profile 已恢复 `connect:false`，语音 Bundle 停用，模拟端口关闭。真实 NapCat、媒体发送、QQ 空间、完整 Owner Agent 与生态联动仍未验收；PR #1 保持 Draft，不可部署。
+
+## 当前检查点（2026-10-26，本地语音转写与能力状态）
+
+新增受 Scene 约束的本地 record→SenseVoice 转写工具；Owner Agent / 自主社交未实现能力不再显示为运行时有效，GUI 明示部分功能待实现。134 项测试中 132 通过、2 项因 Windows 符号链接权限跳过。QA.48 在隔离官方 DSH Desktop 中以本机合成语音和模拟 OneBot 完成真实模型工具调用及本地 ASR；撤权后旧 Session 被拒绝。隔离 Host 已恢复 `connect:false`，语音 Bundle 停用。详见 `docs/verification/LOCAL_RECORD_ASR_2026-10-26.md`。真实 NapCat、真实 QQ、媒体发送和通用 Owner Agent 仍未验收，PR #1 保持 Draft。
+
+## 当前检查点（2026-10-26，消息响应归属）
+
+`qq.get_msg` 现在对平台返回正文核对请求消息 ID，并核对存在的 Scene/发送者字段。Codex 失败回归、原核心 DSH Creator 修复、Codex 复审与 QA.47 真实 DSH 模型工具调用已完成；错配正文未进入模型。126 项测试中 125 通过、1 项因 Windows 符号链接权限跳过；构建通过。隔离 Host 已恢复 `connect:false`。详见 `docs/verification/GET_MSG_SCOPE_2026-10-26.md`。PR #1 仍为 Draft。
+
+## 当前检查点（2026-10-26，只读结果投影）
+
+已开放的只读 OneBot 能力按字段投影，稳定身份结果核对受控目标。125 项测试中 124 通过、1 项因 Windows 符号链接权限跳过；构建通过。QA.46 在隔离官方 DSH Desktop 中通过真实模型目录调用，合成凭据与 URL 未进入工具结果；硬重启后恢复 `connect:false`，模拟服务已关闭。详见 `docs/verification/READ_RESULT_PROJECTION_2026-10-26.md`。PR #1 保持 Draft，独立无头 NapCat 与真实 QQ 尚未验证。
+
+## 当前检查点（2026-10-26，入站图片读取）
+
+最新代码增加 Enhanced Scene 的 `qq_read_message_image`、两种媒体受限 preset、受控本地 `get_image` 文件读取及固定限频传输诊断。Codex 新增失败回归，原有两个官方 DeepSeek Flash 持久 Creator 会话分别实现媒体模块和 preset/Host 接线，Codex 独立审查。`npm test` 为 121 通过、0 失败、1 跳过；`npm run build` 通过。QA.43 在隔离官方 DSH Desktop 上经真实模型工具调用、image block、硬重启持久性与撤权拒绝测试；QA.44 再次通过真实模型图片调用；最终 QA.45 通过安装和重启加载。Safe Chat 请求头不含图片工具或 Shell。详见 `docs/verification/MEDIA_READ_2026-10-26.md`。隔离 Profile 已恢复 `connect:false`，本机模拟 OneBot 已停止。独立无头 NapCat、真实 QQ 和其他媒体形态仍未验证，PR 保持 Draft，不可部署。
+
+## 上一检查点（2026-10-26，Owner 目录与媒体边界）
+
+分支 `codex/m0-baseline` 和原 Draft PR #1 继续承载 v1.0 开发。原生 Settings GUI 的既有操作已在隔离 DSH Desktop 验收；本轮新增草稿切换保护已完成未保存时重选、跨 Scene 点击和取消后切换的真实 GUI 验收，保存中的切换拦截仍仅有客户端测试。`dsh.search` 的真实模型调用与撤权见 `docs/verification/SEARCH_BOUNDARY_2026-10-26.md`。Owner 私聊逐项授权的好友/群目录已完成真实模型工具调用、撤权及重启测试，见 `docs/verification/DIRECTORY_BOUNDARY_2026-10-26.md`。入站媒体与 `get_msg` 定位信息清洗也经真实模型工具调用，见 `docs/verification/MEDIA_BOUNDARY_2026-10-26.md`。`npm test` 当前 111/111。隔离 Profile 已恢复 `connect: false`，真实 QQ 未连接。通用 Owner Agent、媒体内容读取/发送、空间、Life/State 联动和独立 NapCat 实机兼容仍未完成，PR 不可合并部署。
+
+以下为保留的早期 M1 与 M0 历史记录，相关测试数字和阻断状态以当前检查点为准。
+
+## 历史 M1 检查点（2026-10-26）
+
+当前分支仍为 `codex/m0-baseline`，PR #1 未合并。先看 `docs/verification/M1_CANDIDATE_2026-10-26.md` 和当前工作树，不要把下面的 M0 历史记录当作现状。`npm test` 当前 39/39；真实隔离 DSH 的旧候选已通过双发送、模型工具调用、非 QQ 工具拒绝和模拟事件等待续接。Codex 修复了等待消息重启重复投递的回归，但修复后的真实重启链路待复验。
+
+受限 Agent preset 尚未通过官方 DSH 装载：同包自定义 guard 子项报 `never started`，无 guard 又会继承全局 Memory 工具。当前安装包未注册该 preset，源码拒绝以通用 `cordis`/`standard` 创建 QQ Session，真实 QQ 保持断开。原型、旧合成 Session 和模拟 OneBot 状态保留在本地忽略的 `private/qq-development/`，不在 tarball 中。不要向真实 QQ 发送或调整生产配置。
+
+隔离 QA Profile 已恢复到不含 preset 原型的安装包，并在 Plugin Manager 中明确停用 QQ。后续验收先核对安装版本和连接仍关闭，再启用新的受限候选。
+
+同一隔离 Profile 的旧 QQ `cordis` Session 还收到 Memory 自动注入的跨会话合成上下文；仅限制模型工具不足以隔离提示词。QQ + Memory 联合使用前，必须接通可信 Scene 与自动注入门禁，并验证非 QQ 记忆使用不回退。
+
+更新日期：2026-10-25（Asia/Shanghai）。M0 部分完成。
+
+## M0 最新入口
+
+见 docs/m0/BASELINE.md 和 docs/contracts/qq-life-v0.1.md。已核实当前 DSH、bridge 与 SnowLuma，保存脱敏历史工具轨迹；独立无头 NapCat 未确认，未改动生产。
+
+本仓库 tools/validate-envelope.mjs 为独立 DSH worker 经过同会话返工、Codex 审查验收的演示代码；不实现鉴权或消息队列。运行 node --test tests/validate-envelope.test.mjs tests/continuous-trace.test.mjs，本轮 16/16 通过。旧桥隔离等待回归另有 10/10；均不能代替新 NapCat 真实链路验收。
 
 ## 仓库
 
@@ -30,8 +98,8 @@ QQ 交互以现用 bridge 的黑盒体验为基准，允许修改或重写。仅
 
 ## 未运行与限制
 
-- 未实施插件代码、构建、安装、升级、卸载或发布流程。
-- 未验证实际 DSH、QQ、NapCat、设备或其他平台兼容性。
+- 已有事件形状演示校验器；未实施生产插件、构建、安装、升级、卸载或发布流程。
+- DSH 与现用 bridge / SnowLuma 版本已核实，未验证独立 NapCat 和新插件的实际平台兼容性。
 - 未运行本插件功能、契约、降级、权限或集成验收。
 - 当前无契约兼容版本、release 或可安装依赖组合。
 - 本仓库许可证未确定；任何第三方复用均须单独核查。
@@ -41,3 +109,12 @@ QQ 交互以现用 bridge 的黑盒体验为基准，允许修改或重写。仅
 ## 本地同步
 
 在本仓库目录内查看 git status、git log 和 git remote -v；主项目不会代为跟踪本仓库文件。拉取与推送针对本仓库的 origin；主仓库的 plugins/ 被忽略，不使用 Git Submodule。
+
+## 账号切换核查（2026-10-25）
+
+- 当前分支 `codex/m0-baseline`；[PR #1](https://github.com/jeskoky-pixel/amadeus-qq/pull/1)（codex/m0-baseline，未合并）。状态：M0 部分完成，只有形状校验与脱敏测试资料，不是生产 QQ 插件。本轮只补交接文档，没有新功能。
+- 当前文档提交请运行 `git log -1 --format=%H`；主项目 REPOSITORY_MAP 保存插件精确交付 SHA。
+- 契约：QQ/Life 0.1-draft 草案；未实现运行时兼容。独立许可证待拥有者选择，不继承主仓库 MIT。
+- 当前项目只推进 Life；本插件继续按上文职责保留，未经用户新指令不切换开发。QQ 遗留独立 NapCat 和真实链路验收仍待核实。
+- 必读主项目 [接手入口](https://github.com/jeskoky-pixel/Amadeus-dsh/blob/codex/life-development/docs/handoff/NEXT_CODEX_START.md)、[项目状态](https://github.com/jeskoky-pixel/Amadeus-dsh/blob/codex/life-development/docs/handoff/CURRENT_STATE.md)、[架构](https://github.com/jeskoky-pixel/Amadeus-dsh/blob/codex/life-development/docs/ARCHITECTURE.md)。
+- 禁止改动生产 SnowLuma、QQ Bridge、生产 DSH 或登录/记忆数据；禁止 Computer Use、真实发送、擅自发布/merge；保留独立安装和可选依赖边界。文档保存不等于插件验收。

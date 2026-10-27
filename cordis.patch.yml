@@ -1,0 +1,6 @@
+# Real OneBot connectivity is disabled until an administrator configures it.
+- insert:
+    - id: amadeus-qq
+      name: '@amadeus/qq'
+      config:
+        enabled: false

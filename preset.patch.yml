@@ -1,0 +1,103 @@
+# Dedicated DSH Agent preset shipped by the same @amadeus/qq package.
+# It declares only the QQ platform operation contract (tool boundary) and no
+# persona or character card. The guard lives with the preset, so a persisted QQ
+# Session keeps its tool boundary even when the connector is disabled or absent.
+- insert:
+    - id: preset-amadeus-qq
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: amadeus-qq
+        name: Amadeus QQ
+        description: Restricted continuous QQ conversation Session
+        order: 20
+        plugins:
+          - id: qq-tool-boundary
+            # Mount the package root here. DSH's preset registry resolves the
+            # package root reliably; a package subpath export imports under
+            # plain Node but leaves this row "never started" in the registry.
+            name: '@amadeus/qq'
+            config:
+              presetGuard: true
+    - id: preset-amadeus-qq-search
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: amadeus-qq-search
+        name: Amadeus QQ Search
+        description: Restricted QQ conversation with the Host web search boundary
+        order: 21
+        plugins:
+          - id: qq-web-search
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              search: true
+              fetch: false
+              searchTimeoutMs: 60000
+          - id: qq-search-boundary
+            name: '@amadeus/qq'
+            config:
+              presetGuard: true
+              allowSearch: true
+    - id: preset-amadeus-qq-media
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: amadeus-qq-media
+        name: Amadeus QQ Media
+        description: Restricted QQ conversation with an enhanced media read boundary
+        order: 22
+        plugins:
+          - id: qq-media-boundary
+            name: '@amadeus/qq'
+            config:
+              presetGuard: true
+              level: 2
+    - id: preset-amadeus-qq-media-search
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: amadeus-qq-media-search
+        name: Amadeus QQ Media Search
+        description: Restricted QQ conversation with enhanced media read and Host web search
+        order: 23
+        plugins:
+          - id: qq-media-web-search
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              search: true
+              fetch: false
+              searchTimeoutMs: 60000
+          - id: qq-media-search-boundary
+            name: '@amadeus/qq'
+            config:
+              presetGuard: true
+              level: 2
+              allowSearch: true
+    - id: preset-amadeus-qq-owner
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: amadeus-qq-owner
+        name: Amadeus QQ Owner
+        description: Restricted Owner workspace; selected only for a trusted Owner Agent Scene
+        order: 24
+        plugins:
+          - id: qq-owner-boundary
+            # Level 4 guards the QQ tool surface. The Owner workspace tool is
+            # mounted only after an operator supplies ownerWorkspaceRoot; until
+            # then Settings shows it as pending and no file tool exists.
+            name: '@amadeus/qq'
+            config:
+              presetGuard: true
+              level: 4
+          - id: owner-tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+          - id: owner-tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: owner-tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: owner-tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: owner-tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              search: true
+              fetch: true

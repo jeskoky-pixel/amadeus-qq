@@ -1,0 +1,428 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { spawn } from 'node:child_process'
+import { normalizeMessageId } from './storage.js'
+import { sanitizeInboundSegments } from './onebot.js'
+
+const MAX_AUDIO_BYTES = 4 * 1024 * 1024
+const MAX_RESPONSE_BYTES = 6 * 1024 * 1024
+const MAX_BASE64_CHARS = Math.ceil(MAX_AUDIO_BYTES / 3) * 4
+const MAX_DURATION_SECONDS = 120
+const MAX_PCM_BYTES = Math.min(MAX_AUDIO_BYTES - 44, MAX_DURATION_SECONDS * 32000)
+const TRANSCODE_TIMEOUT_MS = 10_000
+const READ_TIMEOUT_MS = 5_000
+const PLATFORM_TIMEOUT_MS = 10_000
+const ASR_TIMEOUT_MS = 120_000
+const MAX_TRANSCRIPT_CHARS = 16_384
+const FFMPEG_ARGS = Object.freeze(['-nostdin', '-hide_banner', '-loglevel', 'error'])
+
+function mediaError(code) {
+  const error = new Error(code)
+  error.code = code
+  return error
+}
+
+function permissionError(code = 'QQ_PERMISSION_DENIED') {
+  return mediaError(`${code}: qq.media.read`)
+}
+
+function assertMediaRead(core, sessionId, changed = false) {
+  let allowed = false
+  try {
+    allowed = core.authorizeSessionCapability(sessionId, 'qq.media.read') === true
+  } catch {
+    allowed = false
+  }
+  if (!allowed) throw permissionError(changed ? 'QQ_PERMISSION_CHANGED' : 'QQ_PERMISSION_DENIED')
+}
+
+/** Resolve only a Scene that the core currently authorizes for this Session. */
+function authorizeScene(core, sessionId) {
+  try {
+    return core.authorizedScene(sessionId)
+  } catch (error) {
+    const changed = String(error?.message ?? '').startsWith('QQ_PERMISSION_CHANGED')
+    throw permissionError(changed ? 'QQ_PERMISSION_CHANGED' : 'QQ_PERMISSION_DENIED')
+  }
+}
+
+function resolveMediaRoot(mediaRoot) {
+  if (typeof mediaRoot !== 'string' || !path.isAbsolute(mediaRoot)) throw mediaError('QQ_MEDIA_ROOT_INVALID')
+  let root
+  try {
+    root = fs.realpathSync(mediaRoot)
+    if (!fs.statSync(root).isDirectory()) throw new Error('not a directory')
+  } catch {
+    throw mediaError('QQ_MEDIA_ROOT_INVALID')
+  }
+  return root
+}
+
+function resolveLocalAudio(file, root, mediaRoot) {
+  if (typeof file !== 'string' || file.length === 0 || file.includes('\u0000')) throw mediaError('QQ_MEDIA_PATH_INVALID')
+  if (/^[\\/]{2}/.test(file)) throw mediaError('QQ_MEDIA_PATH_INVALID')
+  if (!/^[A-Za-z]:[\\/]/.test(file) && /^[A-Za-z][A-Za-z0-9+.-]*:/.test(file)) throw mediaError('QQ_MEDIA_PATH_INVALID')
+  if (!path.isAbsolute(file)) throw mediaError('QQ_MEDIA_PATH_INVALID')
+  const lexical = path.relative(mediaRoot, file)
+  if (lexical === '' || lexical === '..' || lexical.startsWith(`..${path.sep}`) || path.isAbsolute(lexical)) {
+    throw mediaError('QQ_MEDIA_PATH_OUTSIDE_ROOT')
+  }
+
+  let entry
+  try {
+    entry = fs.lstatSync(file)
+  } catch {
+    throw mediaError('QQ_MEDIA_PATH_INVALID')
+  }
+  if (entry.isSymbolicLink() || !entry.isFile()) throw mediaError('QQ_MEDIA_PATH_INVALID')
+
+  let real
+  try {
+    real = fs.realpathSync(file)
+  } catch {
+    throw mediaError('QQ_MEDIA_PATH_INVALID')
+  }
+  const relative = path.relative(root, real)
+  if (relative === '' || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw mediaError('QQ_MEDIA_PATH_OUTSIDE_ROOT')
+  }
+
+  let cursor = mediaRoot
+  for (const part of lexical.split(path.sep)) {
+    cursor = path.join(cursor, part)
+    try {
+      if (fs.lstatSync(cursor).isSymbolicLink()) throw mediaError('QQ_MEDIA_PATH_INVALID')
+    } catch (error) {
+      if (error.code === 'QQ_MEDIA_PATH_INVALID') throw error
+      throw mediaError('QQ_MEDIA_PATH_INVALID')
+    }
+  }
+  return real
+}
+
+function withTimeout(promise, timeoutMs, code) {
+  let timer
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(mediaError(code)), timeoutMs)
+    timer.unref?.()
+  })
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
+}
+
+async function readBoundedAudio(file) {
+  let handle
+  try {
+    handle = await fs.promises.open(file, 'r')
+    const stats = await handle.stat()
+    if (!stats.isFile()) throw mediaError('QQ_MEDIA_READ_FAILED')
+    if (stats.size <= 0) throw mediaError('QQ_MEDIA_EMPTY')
+    if (stats.size > MAX_AUDIO_BYTES) throw mediaError('QQ_MEDIA_TOO_LARGE')
+    const data = Buffer.alloc(stats.size)
+    let offset = 0
+    while (offset < data.length) {
+      const { bytesRead } = await handle.read(data, offset, data.length - offset, offset)
+      if (bytesRead <= 0) throw mediaError('QQ_MEDIA_READ_FAILED')
+      offset += bytesRead
+    }
+    return data
+  } catch (error) {
+    if (typeof error?.code === 'string' && error.code.startsWith('QQ_MEDIA_')) throw error
+    throw mediaError('QQ_MEDIA_READ_FAILED')
+  } finally {
+    if (handle) await handle.close().catch(() => {})
+  }
+}
+
+function decodeInlineWav(value) {
+  if (typeof value !== 'string' || value.length === 0) throw mediaError('QQ_MEDIA_INLINE_INVALID')
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value) || /^data:/i.test(value)) {
+    throw mediaError('QQ_MEDIA_INLINE_INVALID')
+  }
+  if (value.length > MAX_BASE64_CHARS) throw mediaError('QQ_MEDIA_INLINE_TOO_LARGE')
+  let data
+  try {
+    data = Buffer.from(value, 'base64')
+  } catch {
+    throw mediaError('QQ_MEDIA_INLINE_INVALID')
+  }
+  if (data.length === 0) throw mediaError('QQ_MEDIA_INLINE_INVALID')
+  if (data.length > MAX_AUDIO_BYTES) throw mediaError('QQ_MEDIA_INLINE_TOO_LARGE')
+  if (data.toString('base64') !== value) throw mediaError('QQ_MEDIA_INLINE_INVALID')
+  return data
+}
+
+function isMp3(data) {
+  if (data.length >= 3 && data.toString('ascii', 0, 3) === 'ID3') return true
+  return data.length >= 2 && data[0] === 0xff && (data[1] & 0xe0) === 0xe0
+}
+
+function resolveFfmpeg(value) {
+  if (typeof value !== 'string' || !path.isAbsolute(value)) throw mediaError('QQ_MEDIA_TRANSCODER_UNAVAILABLE')
+  let entry
+  try {
+    entry = fs.lstatSync(value)
+  } catch {
+    throw mediaError('QQ_MEDIA_TRANSCODER_UNAVAILABLE')
+  }
+  if (entry.isSymbolicLink() || !entry.isFile()) throw mediaError('QQ_MEDIA_TRANSCODER_UNAVAILABLE')
+  try {
+    fs.accessSync(value, fs.constants.X_OK)
+  } catch {
+    throw mediaError('QQ_MEDIA_TRANSCODER_UNAVAILABLE')
+  }
+  return value
+}
+
+function buildCanonicalWav(pcm) {
+  if (pcm.length === 0 || pcm.length % 2 !== 0) throw mediaError('QQ_MEDIA_TRANSCODER_EMPTY')
+  if (pcm.length > MAX_PCM_BYTES) throw mediaError('QQ_MEDIA_TOO_LARGE')
+  const header = Buffer.alloc(44)
+  header.write('RIFF', 0)
+  header.writeUInt32LE(36 + pcm.length, 4)
+  header.write('WAVEfmt ', 8)
+  header.writeUInt32LE(16, 16)
+  header.writeUInt16LE(1, 20)
+  header.writeUInt16LE(1, 22)
+  header.writeUInt32LE(16000, 24)
+  header.writeUInt32LE(32000, 28)
+  header.writeUInt16LE(2, 32)
+  header.writeUInt16LE(16, 34)
+  header.write('data', 36)
+  header.writeUInt32LE(pcm.length, 40)
+  return Buffer.concat([header, pcm])
+}
+
+function transcodeAudioToWav(input, ffmpegPath, inputFormat) {
+  const executable = resolveFfmpeg(ffmpegPath)
+  return new Promise((resolve, reject) => {
+    let settled = false
+    let timer
+    const finish = (fn, value) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      fn(value)
+    }
+    let child
+    try {
+      child = spawn(executable, [
+        ...FFMPEG_ARGS, '-f', inputFormat, '-i', 'pipe:0', '-vn',
+        '-ac', '1', '-ar', '16000', '-sample_fmt', 's16', '-f', 's16le', 'pipe:1',
+      ], {
+        shell: false,
+        windowsHide: true,
+        stdio: ['pipe', 'pipe', 'ignore'],
+      })
+    } catch {
+      finish(reject, mediaError('QQ_MEDIA_TRANSCODER_UNAVAILABLE'))
+      return
+    }
+    const chunks = []
+    let total = 0
+    timer = setTimeout(() => {
+      try { child.kill('SIGKILL') } catch { /* already gone */ }
+      finish(reject, mediaError('QQ_MEDIA_TRANSCODER_TIMEOUT'))
+    }, TRANSCODE_TIMEOUT_MS)
+    timer.unref?.()
+
+    child.on('error', () => finish(reject, mediaError('QQ_MEDIA_TRANSCODER_UNAVAILABLE')))
+    child.stdout.on('data', chunk => {
+      if (settled) return
+      total += chunk.length
+      if (total > MAX_PCM_BYTES) {
+        try { child.kill('SIGKILL') } catch { /* already gone */ }
+        finish(reject, mediaError('QQ_MEDIA_TOO_LARGE'))
+        return
+      }
+      chunks.push(chunk)
+    })
+    child.on('close', code => {
+      if (settled) return
+      if (code !== 0) {
+        finish(reject, mediaError('QQ_MEDIA_TRANSCODER_FAILED'))
+        return
+      }
+      try {
+        finish(resolve, buildCanonicalWav(Buffer.concat(chunks)))
+      } catch (error) {
+        finish(reject, error)
+      }
+    })
+    child.stdin.on('error', () => {})
+    child.stdin.end(input)
+  })
+}
+
+/** Only an intact, bounded PCM16 WAV with a different rate/channel is eligible for resampling. */
+function isConvertiblePcmWav(data) {
+  if (data.length < 46 ||
+    data.toString('ascii', 0, 4) !== 'RIFF' ||
+    data.toString('ascii', 8, 12) !== 'WAVE' ||
+    data.toString('ascii', 12, 16) !== 'fmt ' ||
+    data.readUInt32LE(16) !== 16 ||
+    data.readUInt16LE(20) !== 1 ||
+    data.toString('ascii', 36, 40) !== 'data' ||
+    data.readUInt32LE(4) !== data.length - 8 ||
+    data.readUInt32LE(40) !== data.length - 44 ||
+    data.readUInt16LE(34) !== 16) return false
+  const channels = data.readUInt16LE(22)
+  const rate = data.readUInt32LE(24)
+  const blockAlign = channels * 2
+  return (channels === 1 || channels === 2) &&
+    rate >= 8000 && rate <= 48000 &&
+    data.readUInt16LE(32) === blockAlign &&
+    data.readUInt32LE(28) === rate * blockAlign &&
+    (data.length - 44) % blockAlign === 0 &&
+    (data.length - 44) / (rate * blockAlign) <= MAX_DURATION_SECONDS
+}
+
+/** Validate the canonical 16 kHz mono PCM16 WAV accepted by the local provider. */
+function validateWav(data) {
+  if (data.length < 46 ||
+    data.toString('ascii', 0, 4) !== 'RIFF' ||
+    data.toString('ascii', 8, 12) !== 'WAVE' ||
+    data.toString('ascii', 12, 16) !== 'fmt ' ||
+    data.readUInt32LE(16) !== 16 ||
+    data.readUInt16LE(20) !== 1 ||
+    data.readUInt16LE(22) !== 1 ||
+    data.readUInt32LE(24) !== 16000 ||
+    data.readUInt32LE(28) !== 32000 ||
+    data.readUInt16LE(32) !== 2 ||
+    data.readUInt16LE(34) !== 16 ||
+    data.toString('ascii', 36, 40) !== 'data' ||
+    data.readUInt32LE(4) !== data.length - 8 ||
+    data.readUInt32LE(40) !== data.length - 44 ||
+    (data.length - 44) % 2 !== 0) {
+    throw mediaError('QQ_MEDIA_INVALID_WAV')
+  }
+  const seconds = (data.length - 44) / 32000
+  if (seconds > MAX_DURATION_SECONDS) throw mediaError('QQ_MEDIA_AUDIO_TOO_LONG')
+  return seconds
+}
+
+function selectLocalProvider(speechToText, providerId) {
+  if (typeof providerId !== 'string' || providerId.length === 0) throw mediaError('QQ_ASR_PROVIDER_REQUIRED')
+  if (!speechToText ||
+    typeof speechToText.listProviders !== 'function' ||
+    typeof speechToText.resolve !== 'function' ||
+    typeof speechToText.transcribe !== 'function') {
+    throw mediaError('QQ_ASR_UNAVAILABLE')
+  }
+  let providers
+  try {
+    providers = speechToText.listProviders()
+  } catch {
+    throw mediaError('QQ_ASR_UNAVAILABLE')
+  }
+  const provider = Array.isArray(providers) ? providers.find(item => item?.id === providerId) : null
+  if (!provider) throw mediaError('QQ_ASR_PROVIDER_UNAVAILABLE')
+  // Local-only v1: sending a QQ recording to a remote recognizer is an explicit
+  // deployment decision that this capability does not take implicitly.
+  if (provider.location !== 'host-local') throw mediaError('QQ_ASR_PROVIDER_REMOTE_FORBIDDEN')
+}
+
+function sanitizeTranscript(text) {
+  if (typeof text !== 'string') throw mediaError('QQ_ASR_INVALID_RESULT')
+  const clean = text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim()
+  if (clean.length === 0) throw mediaError('QQ_ASR_EMPTY_RESULT')
+  if (clean.length > MAX_TRANSCRIPT_CHARS) throw mediaError('QQ_ASR_RESULT_TOO_LARGE')
+  return clean
+}
+
+/**
+ * Transcribe one inbound QQ voice record through the explicitly configured
+ * local ASR provider. The model supplies only messageId and record ordinal;
+ * Scene, record handle, path, provider, and audio never come from model args.
+ */
+export async function transcribeMessageRecord({
+  core,
+  store,
+  transport,
+  speechToText,
+  mediaRoot,
+  providerId,
+  ffmpegPath = '',
+  sessionId,
+  messageId,
+  index = 0,
+}) {
+  if (!Number.isSafeInteger(index) || index < 0) throw mediaError('QQ_MEDIA_INDEX_INVALID')
+  if (!transport || typeof transport.action !== 'function') throw mediaError('QQ_MEDIA_BACKEND_UNAVAILABLE')
+  if (transport.status !== undefined && transport.status !== 'connected') throw mediaError('QQ_MEDIA_BACKEND_UNAVAILABLE')
+
+  const scene = authorizeScene(core, sessionId)
+  assertMediaRead(core, sessionId)
+
+  const root = resolveMediaRoot(mediaRoot)
+  selectLocalProvider(speechToText, providerId)
+
+  let id
+  try {
+    id = normalizeMessageId(messageId, 'messageId')
+  } catch {
+    throw mediaError('QQ_MEDIA_MESSAGE_INVALID')
+  }
+  const row = store.getScene(scene)
+  const message = row?.messages?.find(item => item.messageId === id)
+  if (!message) throw mediaError('QQ_MESSAGE_SCOPE')
+
+  let segments
+  try {
+    segments = sanitizeInboundSegments(message.segments)
+  } catch {
+    throw mediaError('QQ_MEDIA_MESSAGE_INVALID')
+  }
+  const record = segments.filter(segment => segment.type === 'record')[index]
+  const file = record?.data?.file
+  if (typeof file !== 'string' || file.length === 0) throw mediaError('QQ_MEDIA_RECORD_UNAVAILABLE')
+
+  let response
+  try {
+    response = await transport.action('get_record', { file, out_format: 'wav' }, PLATFORM_TIMEOUT_MS, MAX_RESPONSE_BYTES)
+  } catch (error) {
+    throw mediaError(error?.code === 'ONEBOT_RESPONSE_TOO_LARGE'
+      ? 'QQ_MEDIA_RESPONSE_TOO_LARGE'
+      : 'QQ_MEDIA_BACKEND_UNAVAILABLE')
+  }
+  assertMediaRead(core, sessionId, true)
+  if (!response || typeof response !== 'object' || Array.isArray(response)) {
+    throw mediaError('QQ_MEDIA_LOCAL_FILE_UNAVAILABLE')
+  }
+
+  let audio
+  if (typeof response.file === 'string') {
+    // A present file remains authoritative. An inline base64 field must never
+    // bypass a rejected local path.
+    const localFile = resolveLocalAudio(response.file, root, mediaRoot)
+    audio = await withTimeout(readBoundedAudio(localFile), READ_TIMEOUT_MS, 'QQ_MEDIA_TIMEOUT')
+  } else if (typeof response.base64 === 'string') {
+    audio = decodeInlineWav(response.base64)
+  } else {
+    throw mediaError('QQ_MEDIA_LOCAL_FILE_UNAVAILABLE')
+  }
+  if (isMp3(audio)) audio = await transcodeAudioToWav(audio, ffmpegPath, 'mp3')
+  else {
+    try { validateWav(audio) } catch (error) {
+      if (!isConvertiblePcmWav(audio)) throw error
+      audio = await transcodeAudioToWav(audio, ffmpegPath, 'wav')
+    }
+  }
+  validateWav(audio)
+
+  assertMediaRead(core, sessionId, true)
+  let spec
+  try {
+    spec = speechToText.resolve({ audio, providerId })
+  } catch {
+    throw mediaError('QQ_ASR_PROVIDER_UNAVAILABLE')
+  }
+
+  let result
+  try {
+    result = await speechToText.transcribe(spec, AbortSignal.timeout(ASR_TIMEOUT_MS))
+  } catch {
+    throw mediaError('QQ_ASR_FAILED')
+  }
+  assertMediaRead(core, sessionId, true)
+  return { text: sanitizeTranscript(result?.text) }
+}
