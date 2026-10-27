@@ -17,7 +17,6 @@ const QQ_ROOT = path.resolve(HERE, '..')
 const MEMORY_SRC = process.env.AMADEUS_MEMORY_SRC
   ?? 'C:/Users/Jesko/Documents/ChatGPT/Amadeus/private/memory-development/workspace/amadeus-memory/dsh-mneme/src'
 const LIFE_SRC = process.env.AMADEUS_LIFE_SRC ?? path.resolve(QQ_ROOT, '../amadeus-life/src')
-const STATE_ROOT = path.resolve(QQ_ROOT, '../amadeus-state')
 
 function readIfPresent(file) {
   try {
@@ -102,7 +101,7 @@ test('Life session scope is DSH-session based and compatible with QQ sessions', 
   assert.match(index, /isDshSessionScope/)
 })
 
-test('QQ degrades without Life/State and never calls optional ecosystem services', t => {
+test('QQ has no hard Life/State dependency or optional-service calls', () => {
   const srcDir = path.join(QQ_ROOT, 'src')
   const files = fs.readdirSync(srcDir).filter(name => name.endsWith('.js'))
   const source = files.map(name => fs.readFileSync(path.join(srcDir, name), 'utf8')).join('\n')
@@ -110,10 +109,4 @@ test('QQ degrades without Life/State and never calls optional ecosystem services
   const guard = readIfPresent(path.join(srcDir, 'preset-guard.mjs'))
   assert.ok(guard)
   assert.match(guard, /QQ Session cannot use non-QQ tools/)
-  // State is documentation-only; do not count it as a delivered integration.
-  const stateSources = fs.existsSync(path.join(STATE_ROOT, 'src'))
-    ? fs.readdirSync(path.join(STATE_ROOT, 'src'))
-    : []
-  assert.deepEqual(stateSources, [], 'amadeus-state has no implementation yet')
-  assert.equal(fs.existsSync(path.join(STATE_ROOT, 'README.md')), true)
 })

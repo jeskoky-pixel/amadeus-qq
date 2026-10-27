@@ -1,6 +1,6 @@
 # Amadeus QQ v1.0 收缩后任务清单
 
-更新：2026-10-27。基于 `codex/m0-baseline` 当前候选；原 PR #1 保持 Draft。这里区分源码、隔离 DSH Host 与真实 NapCat/QQ 的证据。
+更新：2026-10-27。基于 `codex/m0-baseline` 的 `1.0.0` 包候选；原 PR #1 保持 Draft。这里区分源码、隔离 DSH Host 与真实 NapCat/QQ 的证据。
 
 | 领域 | 状态 | 剩余边界 |
 | --- | --- | --- |
@@ -15,7 +15,7 @@
 | QQ 空间 | `qq_qzone` 统一入口；真实测试号的仅自己可见文字/图片说说发布得到 tid，并调用平台删除 | 点赞、评论等已有 Provider 动作仅单元/模拟；其他可见范围未实测 |
 | Memory | 同一隔离官方 DSH Host 中，使用合成标记和真实绑定的群/私聊 Session：精确查询命中私聊标记，未观察到跨 Scene 注入 | 初始宽泛私聊查询未召回该标记；不宣称通用检索完备，长期生产流量未验证 |
 | Life | 同一隔离 Host 的只读联动通过；受控外发 opt-in 已独立验证：intent 持久化 `life-tool:session:` provenance，管理员对同一 allowlist Owner Session 与授权 QQ 私聊开启 `externalMessageSessionIds` 后 wake 执行，模型恰好一次 `qq_send_message`，QQ 返回 delivered，NapCat `get_msg` 与指定 Owner 好友历史确认私有文字；关闭 opt-in 后新 intent 的 wake 为零 QQ 发送 | 首次尝试因错误 provenance 检查未发送，Life 源码已改为读取持久 intent；opt-in 只改变提示指导，不是 Life 级硬闸门，QQ Scene 权限仍是权威；长期自治与任意 QQ 目标未验证 |
-| State | 可选降级，QQ 无硬依赖 | State 尚无稳定运行源码，未联动 |
+| State | 可选降级，QQ 无硬依赖 | State 1.0.0 已合并；四插件同 Host 联合验收另行记录 |
 | 管理与交付 | 原生 Settings、Admin API 和 Web Console；最终包隔离 Desktop 的 HTTP 路由、匿名拒绝、CSP、禁连状态和真实浏览器中的 Scene 图节点点击/筛选/重置已验收；停用 Memory Bundle 时同一 UI 仍加载并显示授权 Scene 拓扑，确认无 Memory 运行时依赖；权限编辑器保留 | 窄屏由横向滚动/列表回退处理，未做移动端视觉回归；Memory 自身实体 UI 是独立 Mneme 视图，本轮隔离库为空，未绘制新的语义图数据；安装包与 PR 交付见最终报告 |
 
 ## 已移出 v1.0 门槛
@@ -26,7 +26,7 @@
 
 真实外发只对用户授权的测试私聊和仅含 Owner 与测试 Bot 的授权群执行；群发送/附件证据来自该群。账号资料与空间操作只在测试号进行并已恢复或清理。隔离 NapCat 的 QQ 客户端媒体缓存仍共用系统 `Documents/Tencent Files`，因此本轮不宣称 QQ 客户端级完全隔离。生产 DSH Profile、SnowLuma Bot、QQ Bridge、Memory 与 Life 数据不应直接用作迁移或破坏性测试。
 
-当前 `npm test`：264 通过、0 失败、4 跳过；四个跳过项均因本机 Windows 无法创建符号链接。`npm run build`、打包与 `git diff --check` 通过。
+当前 `npm test`：281 通过、0 失败、4 跳过；四个跳过项均因本机 Windows 无法创建符号链接。`npm run build` 与 `git diff --check` 通过；`1.0.0` 最终包待集中安装验收。
 
 ## 部署与回滚建议
 

@@ -1,6 +1,6 @@
 {
   "name": "@amadeus/qq",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Amadeus QQ continuous interaction plugin for DeepSeek Harness",
   "type": "module",
@@ -19,7 +19,10 @@
     "scripts",
     "cordis.patch.yml",
     "preset.patch.yml",
-    "README.md"
+    "README.md",
+    "docs/RELEASE_NOTES.md",
+    "docs/COMPATIBILITY.md",
+    "docs/V1_SCOPE.md"
   ],
   "dsh": {
     "manifestVersion": 1,

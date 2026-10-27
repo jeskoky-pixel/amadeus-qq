@@ -7,9 +7,14 @@ const presetPatch = fs.readFileSync(new URL('../preset.patch.yml', import.meta.u
 
 test('one package ships both the connector plugin and the Agent preset patch', () => {
   assert.equal(packageJson.name, '@amadeus/qq')
+  assert.equal(packageJson.version, '1.0.0')
   assert.deepEqual(packageJson.dsh.bundle.patch, ['./cordis.patch.yml', './preset.patch.yml'])
   for (const file of packageJson.dsh.bundle.patch) {
     assert.equal(fs.existsSync(new URL(`../${file.replace('./', '')}`, import.meta.url)), true, file)
+  }
+  for (const doc of ['docs/RELEASE_NOTES.md', 'docs/COMPATIBILITY.md', 'docs/V1_SCOPE.md']) {
+    assert.ok(packageJson.files.includes(doc), `${doc} must ship in the v1 package`)
+    assert.ok(fs.existsSync(new URL(`../${doc}`, import.meta.url)), `${doc} must exist`)
   }
 })
 
