@@ -1,6 +1,6 @@
 # Amadeus QQ v1.0 收缩后任务清单
 
-更新：2026-10-27。基于 `codex/m0-baseline` 的 `1.0.0` 包候选；原 PR #1 保持 Draft。这里区分源码、隔离 DSH Host 与真实 NapCat/QQ 的证据。
+更新：2026-10-27。`1.0.0` 已完成限定功能、隔离 DSH Host、真实 NapCat/QQ 与四插件同 Profile 的验收；以下仍区分各项证据来源。
 
 | 领域 | 状态 | 剩余边界 |
 | --- | --- | --- |
@@ -26,7 +26,7 @@
 
 真实外发只对用户授权的测试私聊和仅含 Owner 与测试 Bot 的授权群执行；群发送/附件证据来自该群。账号资料与空间操作只在测试号进行并已恢复或清理。隔离 NapCat 的 QQ 客户端媒体缓存仍共用系统 `Documents/Tencent Files`，因此本轮不宣称 QQ 客户端级完全隔离。生产 DSH Profile、SnowLuma Bot、QQ Bridge、Memory 与 Life 数据不应直接用作迁移或破坏性测试。
 
-当前 `npm test`：281 通过、0 失败、4 跳过；四个跳过项均因本机 Windows 无法创建符号链接。`npm run build` 与 `git diff --check` 通过；`1.0.0` 最终包待集中安装验收。
+当前 `npm test`：281 通过、0 失败、4 跳过；四个跳过项均因本机 Windows 无法创建符号链接。`npm run build` 与 `git diff --check` 通过；`1.0.0` 最终包已在全新隔离 Desktop 与另外三个插件共同安装、加载和停用恢复，详见[联合报告](https://github.com/jeskoky-pixel/Amadeus-dsh/blob/main/docs/verification/AMADEUS_V1_FOUR_PLUGIN_ACCEPTANCE.md)。
 
 ## 部署与回滚建议
 
