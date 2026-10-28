@@ -9,11 +9,12 @@
 | 项目 | 证据 | 结论 |
 | --- | --- | --- |
 | QQ 会话连续性 | 完整测试 295 项：290 通过、0 失败、5 跳过；本轮定向 53/53 通过。隔离 Owner GUI 修改群场景静默窗口、新增无关白名单场景，原群 Session ID 均未改变；移除临时场景后原测试群仍在。 | 普通行为和无关白名单修改不再撤销现有绑定；权限与 Agent Preset 安全切换仍撤权。 |
-| Memory 可信身份 | 完整产品测试 712/712 通过；本轮近期活动、运行时及发行流程定向 36/36 通过。跨 Session 授权通过 Host `sessions.get(id)` 取得完整 Session Header，ID 不符、缺失和撤权均拒绝；QQ Host 存在时普通 Preset 与 QQ Scene 的单元契约通过。 | 先前 `{id}` 与可信 Header 契约冲突已修复，未放宽 QQ Scene 边界。 |
+| Memory 可信身份 | 完整产品测试 714/714 通过；最终近期活动核心与运行时定向 37/37 通过。跨 Session 授权通过 Host `sessions.get(id)` 取得完整 Session Header；运行时另从可信 QQ Host 实时核对源、目标 Scene。普通 DSH Session 之间仍可分享；无关 QQ Scene、QQ→普通及普通→QQ 均拒绝。旧库已有的非法分享策略也在读取时拦截；撤销 Host 绑定立即失效。 | 先前 `{id}` 与可信 Header 契约冲突及原始近期摘要跨 Scene 授权缺口均已修复，未放宽 QQ Scene 边界。 |
 | Memory 包名与升级 | `@amadeus/memory@1.0.1` 已用于包名和发行补丁；插件 ID 仍为 `dsh-mneme`，默认数据路径不变。源码及 tarball 隐私检查通过。安装文档写明两个 QQ Scene 开关及旧库隔离副本迁移。 | 旧配置沿用；升级时必须停用旧包，避免双实例。 |
 | 同 Profile 联动 | 四插件同时在隔离 Desktop 响应各自 Owner HTTP 接口。QQ、Memory、Life、State 均绑定同一官方 Workspace；重启后绑定保留。State 与 Life 的 Workspace 列表均包含已授权 QQ 群聊及私聊 Session。 | 未观察到 Host 端点冲突；跨插件 Session 成员识别正常。 |
 | Memory Scene 开关 | 在隔离 Owner 设置接口启用 `sceneIsolationEnabled`、`sceneStrictQQ`、`recentActivityEnabled`，硬重启后近期活动运行、两个 Scene 开关生效。 | QQ 记忆首次配置要求已明确，运行配置可持久恢复。 |
 | 真实 DSH 模型与近期活动 | 清除旧浏览器确认框后，在隔离 Desktop 现有 QQ 私聊与群聊 Session 各完成一次最小模型调用；Memory 近期活动总数为 2，各 Session 的自读预览各返回 1 条。过期、无 QQ Host 绑定的 Session 仍拒绝。NapCat 连接保持关闭。 | 实际模型事件到 Memory 的自 Scene 近期活动链路通过；没有发生 QQ 外发。 |
+| 最终 Memory 候选包 | `@amadeus/memory@1.0.1` tarball SHA-256 `5943211cf577b7445b2c382e4bf3b0325699dfd173f5645ce25104ac0793b838`，源码/发行包隐私检查通过；官方 Plugin Manager 在同一隔离 Profile 安装结果 `application=applied`。安装目录含最终配对授权代码；硬重启后四插件的 Owner HTTP 接口均返回 200。 | 最终候选已落在隔离 Profile 并恢复加载；这不等于隔离 NapCat 的端到端测试。 |
 
 ## 尚未通过的真实环境验收
 
@@ -26,5 +27,6 @@
 
 - 已修复：QQ 的普通配置变更导致无关 Session 重建；安全变更仍按原权限边界撤权，旧会话历史保留。
 - 已修复：Memory 跨 Session 近期活动的 ID-only 授权与 QQ Host Header 契约冲突。
+- 已修复：Memory 原始近期摘要的分享策略只分别校验源/目标、未校验二者 Scene 关系。最终包对策略写入、旧策略读取及动态撤权均加可信 Host 配对闸门。
 - 已完成：Memory 发行名、版本、兼容测试和首次配置/旧库迁移说明。
 - 待验收：休眠持久 Session 的可信 Header 解析、隔离 NapCat 联合实机、浏览器 GUI 与模型工具调用。四个 PR 在这些项目确认前不合并、不发布。
