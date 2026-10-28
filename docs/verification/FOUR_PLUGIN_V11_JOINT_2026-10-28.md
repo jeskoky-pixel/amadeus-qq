@@ -13,12 +13,13 @@
 | Memory 包名与升级 | `@amadeus/memory@1.0.1` 已用于包名和发行补丁；插件 ID 仍为 `dsh-mneme`，默认数据路径不变。源码及 tarball 隐私检查通过。安装文档写明两个 QQ Scene 开关及旧库隔离副本迁移。 | 旧配置沿用；升级时必须停用旧包，避免双实例。 |
 | 同 Profile 联动 | 四插件同时在隔离 Desktop 响应各自 Owner HTTP 接口。QQ、Memory、Life、State 均绑定同一官方 Workspace；重启后绑定保留。State 与 Life 的 Workspace 列表均包含已授权 QQ 群聊及私聊 Session。 | 未观察到 Host 端点冲突；跨插件 Session 成员识别正常。 |
 | Memory Scene 开关 | 在隔离 Owner 设置接口启用 `sceneIsolationEnabled`、`sceneStrictQQ`、`recentActivityEnabled`，硬重启后近期活动运行、两个 Scene 开关生效。 | QQ 记忆首次配置要求已明确，运行配置可持久恢复。 |
+| 真实 DSH 模型与近期活动 | 清除旧浏览器确认框后，在隔离 Desktop 现有 QQ 私聊与群聊 Session 各完成一次最小模型调用；Memory 近期活动总数为 2，各 Session 的自读预览各返回 1 条。过期、无 QQ Host 绑定的 Session 仍拒绝。NapCat 连接保持关闭。 | 实际模型事件到 Memory 的自 Scene 近期活动链路通过；没有发生 QQ 外发。 |
 
 ## 尚未通过的真实环境验收
 
-1. 官方 DSH `SessionStore.get(id)` 只返回活跃 Session。隔离 Desktop 重启后，旧普通会话与 QQ 会话的近期活动预览安全拒绝 `session-identity-unavailable`；未能在本轮创建并保持两个活跃普通会话完成真实分享。因此“休眠的持久 Session 也可继续跨 Session 分享”尚未实现/验收。若要支持，须引入 Host 可信的持久 Header 解析契约，不能回退到 `{id}` 授权。
+1. 官方 DSH `SessionStore.get(id)` 只返回活跃 Session。隔离 Desktop 重启后，休眠会话的近期活动预览安全拒绝 `session-identity-unavailable`；未能在本轮创建并保持两个活跃普通会话完成真实分享。因此“休眠的持久 Session 也可继续跨 Session 分享”尚未实现/验收。若要支持，须引入 Host 可信的持久 Header 解析契约，不能回退到 `{id}` 授权。
 2. 隔离 NapCat 测试端口未监听。运行中的 NapCatQQ Desktop 无隔离数据目录标记，不能确认是否为生产实例，本轮未连接或向 QQ 外发。因此连续对话实机、Life 自主唤醒与 QQ 去重、真实 QQ 长期记忆和权限撤销后的外发阻断仍待同一隔离测试实例复验。
-3. 浏览器中旧 QQ 控制台的 JavaScript 确认框阻塞后续点击。先前首次配置和行为修改的 GUI 操作已有记录；本轮未完成新的普通 DSH 会话模型调用与完整 GUI 复测。不可把 Owner HTTP 接口或合成测试当作 GUI/模型实机通过。
+3. 浏览器中旧 QQ 控制台的 JavaScript 确认框已从 Windows 窗口取消，GUI 可继续操作。尝试“新建会话”时，DSH UI 先选中了 Workspace 中已有的空白 QQ Scene Session，模型调用因此落在 QQ Scene；这不能代替普通 DSH Session 之间的实机分享。普通用户全路径 GUI 复测仍待完成。
 4. Memory 的真实 Embedding 检索、State 自动演化、Life 定时唤醒及四插件组合下的性能未在本轮重测。上述功能已有各自测试，本轮报告不扩大其真实环境结论。
 
 ## 本轮问题清单与处理
