@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Amadeus QQ · 管理控制台</title>
+  <link rel="stylesheet" href="console.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-logo">A</div><div><div class="brand-label">Amadeus QQ <span class="brand-tag">v1.1</span></div><div class="brand-sub">与世界一起聊天</div></div></div>
+      <div><div class="nav-label">CONSOLE · 管理控制台</div><nav class="nav" aria-label="主导航">
+        <button type="button" data-page="overview" class="active">总览首页</button>
+        <button type="button" data-page="scenes">会话管理</button>
+        <button type="button" data-page="features">功能中心</button>
+        <div class="nav-divider"></div>
+        <button type="button" data-page="account">账号与 QQ 空间</button>
+        <button type="button" data-page="global">全局设置</button>
+        <button type="button" data-page="diagnostics">运行与诊断</button>
+      </nav></div>
+      <div class="sidebar-bottom"><div class="plugin-status"><span class="micro">插件运行状态</span><strong id="side-status">正在读取</strong><p id="side-detail">等待 DSH Owner 鉴权</p><div class="idline"><span>Bot</span><b id="side-bot">—</b></div><div class="idline"><span>Owner</span><b id="side-owner">—</b></div></div></div>
+    </aside>
+    <main class="main"><div class="main-width">
+      <header class="head"><div class="page-lead"><div class="eyebrow">AMADEUS · QQ INTEGRATION</div><h1 id="page-title">总览首页</h1><p id="page-subtitle">连接状态、会话和首次配置。</p></div><div class="head-right"><div class="head-status" id="transport-status">NapCat：正在检查</div><button class="button" id="theme-toggle" type="button">切换主题</button></div></header>
+      <div id="notice" class="inline-notice hide" role="status" aria-live="polite"></div>
+
+      <section id="view-overview" class="view active" aria-label="总览首页">
+        <div class="stats-grid">
+          <div class="card stat-card"><div class="stat-top">插件状态</div><div class="stat-value" id="overview-plugin">—</div><div class="stat-caption" id="overview-transport">读取中</div></div>
+          <div class="card stat-card"><div class="stat-top">已授权会话</div><div class="stat-value" id="overview-scenes">0</div><div class="stat-caption">每个 QQ 场景独立绑定 DSH Session</div></div>
+          <div class="card stat-card"><div class="stat-top">实际 Session</div><div class="stat-value" id="overview-sessions">0</div><div class="stat-caption">授权后创建，重启后恢复</div></div>
+          <div class="card stat-card"><div class="stat-top">目标工作区</div><div class="stat-value" id="overview-workspace">未选择</div><div class="stat-caption">QQ 会话归属此 DSH Workspace</div></div>
+        </div>
+        <div class="two-columns"><div class="card padded"><h2>最近会话</h2><div id="overview-list" class="scene-list"></div><button class="button soft" type="button" data-page="scenes">管理会话</button></div><div class="card padded"><h2>首次设置</h2><p>选择 Workspace、配置本机 NapCat、指定唯一 Owner，然后授权群聊或私聊。</p><div id="onboarding" class="check-flow"></div><button class="button primary" type="button" data-page="global">打开全局设置</button></div></div>
+        <div class="inline-notice"><b>QQ 与 Life 的边界：</b>QQ 只处理当前聊天和同一 Session 内的等待续接。长期自主唤醒由可选的 Life 插件负责。</div>
+      </section>
+
+      <section id="view-scenes" class="view" aria-label="会话管理">
+        <div class="scene-layout"><div class="card scene-panel"><div class="sect-head"><h2>授权会话</h2><button class="button mini" id="add-scene" type="button">添加</button></div><input class="input" id="scene-filter" type="search" placeholder="筛选群号或 QQ 号" aria-label="筛选会话"><div id="scene-list" class="scene-list"></div></div>
+          <div class="card scene-detail" id="scene-detail"><h2>选择会话</h2><p>选择左侧 Scene 查看权限、Session 绑定和运行状态。</p></div></div>
+      </section>
+
+      <section id="view-features" class="view" aria-label="功能中心"><div class="callout"><div><b>按实际执行条件展示</b><p>源码路径、Provider 可用性和真实 QQ 验收是不同状态；这里的可用性以当前配置为准。</p></div></div><div id="feature-list" class="feature-grid"></div></section>
+
+      <section id="view-account" class="view" aria-label="账号与 QQ 空间"><div class="callout"><div><b>仅可信 Owner 私聊</b><p>账号资料和 QQ 空间不属于任何群聊预设；请先在 Owner 私聊 Scene 选择 Owner Agent。两组设置分别保存，避免其中一步失败后误以为全部生效。</p></div></div><form id="account-form"><div class="two-columns"><div class="card padded"><h2>账号资料</h2><p>昵称、签名、在线状态和头像均由 Owner 专用工具操作。</p><label class="form-label"><input id="account-profile" type="checkbox"> 允许 Owner 私聊修改账号资料</label><div id="account-status" class="inline-notice"></div></div><div class="card padded"><h2>QQ 空间</h2><p>Provider、账号级授权和 Scene 显式授权会逐层检查。</p><label class="form-label"><input id="account-qzone-enabled" type="checkbox"> 启用 QZone 工具</label><label class="form-label"><input id="account-qzone-publish" type="checkbox"> 授权此 Bot 发布空间内容</label><label class="form-label"><input id="account-qzone-use" type="checkbox"> 允许 Owner 私聊使用 QZone</label><label class="form-label" for="account-qzone-url">可选本机 QZone Provider 地址</label><input class="input" id="account-qzone-url" placeholder="http://127.0.0.1:端口"><label class="form-label" for="account-qzone-token-env">Provider Token 环境变量名</label><input class="input" id="account-qzone-token-env" placeholder="QZONE_ACCESS_TOKEN"><div id="qzone-status" class="inline-notice"></div></div></div><div class="detail-footer"><span id="account-state">当前设置</span><div class="detail-footer-actions"><button class="button" type="button" id="account-discard">撤销修改</button><button class="button primary" type="submit" data-account-save="scene">保存 Owner 授权</button><button class="button primary" type="submit" data-account-save="provider">保存空间配置</button></div></div></form></section>
+
+      <section id="view-global" class="view" aria-label="全局设置"><div class="callout"><div><b>由 DSH Owner 管理</b><p>配置保存到当前 DSH Profile，Token 不会回显。改动通过 DSH 配置服务应用；连接状态以运行诊断为准。</p></div></div>
+        <form id="setup-form"><div class="form-grid">
+          <div class="card form-card"><h3>DSH Workspace</h3><p>所有新建 QQ Session 都会实际加入所选 Workspace。</p><label class="form-label" for="setup-workspace">工作区</label><select class="input" id="setup-workspace" required></select></div>
+          <div class="card form-card"><h3>Bot 与 Owner</h3><label class="form-label" for="setup-bot">Bot QQ 号</label><input class="input" id="setup-bot" inputmode="numeric" pattern="[1-9][0-9]*" required><label class="form-label" for="setup-owner">唯一 Owner QQ 号</label><input class="input" id="setup-owner" inputmode="numeric" pattern="[1-9][0-9]*" required></div>
+          <div class="card form-card"><h3>本机 NapCat / OneBot</h3><label class="form-label" for="setup-http">HTTP 地址</label><input class="input" id="setup-http" type="url" placeholder="http://127.0.0.1:3000" required><label class="form-label" for="setup-ws">WebSocket 地址</label><input class="input" id="setup-ws" placeholder="ws://127.0.0.1:3001" required><label class="form-label" for="setup-token">Access Token</label><input class="input" id="setup-token" type="password" autocomplete="new-password" placeholder="留空则保留现有 Token"><p class="form-hint" id="token-hint">当前未配置 Token</p></div>
+          <div class="card form-card"><h3>默认授权</h3><p>未知群聊和私聊始终拒绝。Owner 私聊会自动加入白名单。</p><label class="form-label" for="setup-groups">授权群号，逗号分隔</label><input class="input" id="setup-groups" placeholder="例如 123456789"><label class="form-label" for="setup-private">授权好友 QQ 号，逗号分隔</label><input class="input" id="setup-private"><label class="form-label"><input id="setup-connect" type="checkbox"> 启用 NapCat 连接</label></div>
+          <div class="card form-card"><h3>全局拒绝</h3><p>被勾选的能力对所有 Scene 生效，即使单个 Scene 请求允许也不能执行。此处由 DSH Owner 管理。</p><div id="setup-global-deny" class="global-deny-grid"></div></div>
+        </div><div class="detail-footer"><span id="setup-state">尚未修改</span><div class="detail-footer-actions"><button class="button" id="setup-discard" type="button">撤销修改</button><button class="button primary" type="submit">保存并应用</button></div></div></form>
+      </section>
+
+      <section id="view-diagnostics" class="view" aria-label="运行与诊断"><div class="stats-grid"><div class="card stat-card"><div class="stat-top">插件</div><div class="stat-value" id="diag-plugin">—</div></div><div class="card stat-card"><div class="stat-top">NapCat WebSocket</div><div class="stat-value" id="diag-transport">—</div></div><div class="card stat-card"><div class="stat-top">Workspace</div><div class="stat-value" id="diag-workspace">—</div></div><div class="card stat-card"><div class="stat-top">授权 Scene</div><div class="stat-value" id="diag-scenes">—</div></div></div><div class="card padded"><h2>配置检查</h2><div id="diagnostic-list" class="check-flow"></div><button class="button soft" id="refresh" type="button">重新检查</button></div></section>
+      <footer class="footer">Amadeus QQ v1.1.0 · 本地 DSH Owner 控制台</footer>
+    </div></main>
+  </div>
+  <dialog id="add-modal" class="modal" aria-labelledby="add-modal-title"><form id="add-form"><h2 id="add-modal-title">添加 QQ 会话</h2><p>新 Scene 默认安全聊天权限；可以在添加后选择“仅观察”。</p><div class="radio-pair"><label><input type="radio" name="kind" value="group" checked> 群聊</label><label><input type="radio" name="kind" value="private"> 私聊</label></div><label class="form-label" for="add-peer">群号 / QQ 号</label><input class="input" id="add-peer" inputmode="numeric" pattern="[1-9][0-9]*" required><div class="actions"><button class="button" id="add-cancel" type="button">取消</button><button class="button primary" type="submit">添加</button></div></form></dialog>
+  <script src="console.js"></script>
+</body>
+</html>

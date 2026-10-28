@@ -8,7 +8,7 @@
  */
 
 import { sceneIdentity } from './storage.js'
-import { MODE_IDS, validateScenePermissions } from './permissions.js'
+import { BEHAVIOR_PRESETS, CAPABILITY_CATALOG, MODE_IDS, validateScenePermissions } from './permissions.js'
 import { ownerWorkspaceStatus, providerStatus } from './owner-workspace.js'
 import { CONSOLE_CSS, CONSOLE_HTML, CONSOLE_JS } from './web-console.js'
 
@@ -160,7 +160,10 @@ function exactKeys(object, keys, label) {
 function parsePermissionRequest(body) {
   exactKeys(body, ['scene', 'access', 'expectedRevision'], 'request')
   exactKeys(body.scene, ['botId', 'kind', 'peerId'], 'scene')
-  exactKeys(body.access, ['mode', 'overrides'], 'access')
+  if (body.access === null || typeof body.access !== 'object' || Array.isArray(body.access) ||
+    Object.keys(body.access).some(key => !['mode', 'overrides', 'behavior'].includes(key))) {
+    throw new RequestError(400, 'access has unexpected fields')
+  }
   let scene
   try {
     scene = sceneIdentity(body.scene)
@@ -221,6 +224,10 @@ function sendFailure(res, error) {
   if (error?.code === 'QQ_SCENE_UNAUTHORIZED') {
     return fail(res, 403, 'QQ_SCENE_UNAUTHORIZED', 'Scene is outside the configured allowlist')
   }
+  if (error?.message === 'QQ_SETUP_CONFLICT') return fail(res, 409, 'QQ_SETUP_CONFLICT', 'QQ settings changed; reload before retrying')
+  if (error?.message === 'QQ_SETUP_UNAVAILABLE' || error?.message === 'QQ_WORKSPACE_UNAVAILABLE') {
+    return fail(res, 503, 'QQ_SETUP_UNAVAILABLE', 'DSH settings or Workspace service is unavailable')
+  }
   if (error instanceof RequestError) return fail(res, error.status, 'QQ_REQUEST_INVALID', error.message)
   if (error instanceof TypeError) return fail(res, 400, 'QQ_REQUEST_INVALID', 'invalid Scene or permission request')
   const message = String(error?.message ?? '')
@@ -242,8 +249,8 @@ function sendFailure(res, error) {
  * @param {Record<string, unknown>|undefined} connection - DSH Connection service.
  * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => Promise<void>} handler.
  */
-export function createAdminHandler(core, connection) {
-  if (!core || typeof core.listScenePermissions !== 'function' || typeof core.setScenePermissions !== 'function') {
+export function createAdminHandler(core, connection, setup = null) {
+  if (core && (typeof core.listScenePermissions !== 'function' || typeof core.setScenePermissions !== 'function')) {
     throw new TypeError('createAdminHandler requires a QQCore')
   }
   return async function adminHandler(req, res) {
@@ -259,6 +266,22 @@ export function createAdminHandler(core, connection) {
     if (!auth.ok) return send(res, auth.status, { ok: false, code: auth.code, error: auth.message })
 
     const path = url.pathname.slice(ADMIN_PREFIX.length) || '/'
+    if (req.method === 'GET' && path === '/setup') {
+      if (!setup) return fail(res, 503, 'QQ_SETUP_UNAVAILABLE', 'DSH settings service is unavailable')
+      try { return send(res, 200, { ok: true, data: setup.status() }) }
+      catch (error) { return sendFailure(res, error) }
+    }
+    if (req.method === 'POST' && ['/setup', '/scenes/allowlist', '/scenes/pause', '/account'].includes(path)) {
+      if (!setup) return fail(res, 503, 'QQ_SETUP_UNAVAILABLE', 'DSH settings service is unavailable')
+      let body
+      try { body = await readBody(req) } catch (error) { return sendFailure(res, error) }
+      try {
+        const data = path === '/setup' ? await setup.save(body)
+          : path === '/scenes/allowlist' ? await setup.setScene(body)
+          : path === '/scenes/pause' ? await setup.pauseScene(body) : await setup.saveAccount(body)
+        return send(res, 200, { ok: true, data })
+      } catch (error) { return sendFailure(res, error) }
+    }
     if (req.method === 'GET') {
       if (path === '/console') {
         return sendConsoleAsset(res, 'text/html; charset=utf-8', CONSOLE_HTML)
@@ -270,6 +293,7 @@ export function createAdminHandler(core, connection) {
         return sendConsoleAsset(res, 'text/css; charset=utf-8', CONSOLE_CSS)
       }
       if (path !== '/scenes') return fail(res, 404, 'QQ_ENDPOINT_UNKNOWN', 'unknown QQ management endpoint')
+      if (!core) return send(res, 200, { ok: true, data: { scenes: [], health: { enabled: false, transport: 'disabled' }, modes: [...MODE_IDS], behaviorPresets: BEHAVIOR_PRESETS, catalog: CAPABILITY_CATALOG, ownerWorkspace: ownerWorkspaceStatus(), providers: providerStatus() } })
       try {
         return send(res, 200, {
           ok: true,
@@ -277,6 +301,8 @@ export function createAdminHandler(core, connection) {
             scenes: core.listScenePermissions(),
             health: core.health(),
             modes: [...MODE_IDS],
+            behaviorPresets: BEHAVIOR_PRESETS,
+            catalog: CAPABILITY_CATALOG,
             ownerWorkspace: ownerWorkspaceStatus(),
             providers: providerStatus(),
           },
@@ -289,6 +315,7 @@ export function createAdminHandler(core, connection) {
     if (path !== '/scenes/permissions' && path !== '/deliveries/resolve') {
       return fail(res, 404, 'QQ_ENDPOINT_UNKNOWN', 'unknown QQ management endpoint')
     }
+    if (!core) return fail(res, 503, 'QQ_MANAGEMENT_UNAVAILABLE', 'QQ connector is not enabled')
     let body
     try {
       body = await readBody(req)

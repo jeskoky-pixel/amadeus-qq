@@ -36,7 +36,8 @@ test('per-Scene override permits a low-risk read but cannot bypass global or acc
   assert.equal(engine.evaluate(groupA, access, 'qq.qzone.publish').allowed, false)
   assert.equal(new PermissionEngine().evaluate(groupB, { mode: 'observe', overrides: { 'dsh.search': 'allow' } }, 'dsh.search').allowed, true)
   const accountGranted = new PermissionEngine({ accountGrants: { byBotId: { '10001': { qzonePublish: true } } } })
-  assert.equal(accountGranted.evaluate(groupA, { mode: 'autonomous-social' }, 'qq.qzone.publish').allowed, true)
+  assert.equal(accountGranted.evaluate(groupA, { mode: 'autonomous-social' }, 'qq.qzone.publish').allowed, false)
+  assert.equal(accountGranted.evaluate(groupA, { mode: 'autonomous-social', overrides: { 'qq.qzone.publish': 'allow' } }, 'qq.qzone.publish').allowed, true)
   assert.equal(new PermissionEngine({ accountGrants: { qzonePublish: true } })
     .evaluate(groupA, { mode: 'autonomous-social' }, 'qq.qzone.publish').allowed, false)
 })
@@ -163,7 +164,7 @@ test('QZone reads require explicit Owner or Autonomous Social Scene authorizatio
     .evaluate(groupA, { mode: 'autonomous-social', overrides: { [capability]: 'allow' } }, capability).allowed, false)
 })
 
-test('group management is available by default in an authorized group and remains independently deniable', () => {
+test('ordinary presets deny group management by default and retain explicit guarded grants', () => {
   const engine = new PermissionEngine({ ownerPrivateIds: ['30001'] })
   const capabilities = [
     'qq.group.essence', 'qq.group.notice', 'qq.group.card',
@@ -171,13 +172,16 @@ test('group management is available by default in an authorized group and remain
     'qq.group.name', 'qq.group.admin', 'qq.group.special_title',
   ]
   for (const capability of capabilities) {
-    assert.equal(engine.evaluate(groupA, null, capability).allowed, true)
-    assert.equal(engine.evaluate(groupA, { mode: 'safe-chat', overrides: { [capability]: 'deny' } }, capability).allowed, false)
+    for (const mode of ['safe-chat', 'enhanced', 'autonomous-social']) {
+      assert.equal(engine.evaluate(groupA, { mode }, capability).allowed, false)
+    }
+    assert.equal(engine.evaluate(groupA, { mode: 'safe-chat', overrides: { [capability]: 'allow' } }, capability).allowed, true)
     assert.equal(new PermissionEngine({ globalDeny: [capability] }).evaluate(groupA, null, capability).allowed, false)
     assert.equal(engine.evaluate(otherPrivate, { mode: 'autonomous-social', overrides: { [capability]: 'allow' } }, capability).allowed, false)
   }
   for (const capability of ['qq.reaction.write', 'qq.poke', 'qq.recall']) {
-    assert.equal(engine.evaluate(groupA, null, capability).allowed, true)
+    assert.equal(engine.evaluate(groupA, null, capability).allowed, false)
+    assert.equal(engine.evaluate(groupA, { mode: 'enhanced' }, capability).allowed, true)
     assert.equal(engine.evaluate(groupA, { mode: 'observe' }, capability).allowed, false)
   }
 })

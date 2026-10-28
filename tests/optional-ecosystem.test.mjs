@@ -75,7 +75,10 @@ test('Memory recognises every QQ preset this package ships', t => {
   // Both the trusted-scene gate and user-settings suppression must use the set,
   // not an exact single preset name.
   assert.match(inject, /function isQQSession\(ctx\)/)
-  assert.match(inject, /if \(!isQQSession\(renderCtx\)\) return render\(\)/)
+  assert.match(inject, /function renderForQQScene\(renderCtx, render\)/)
+  assert.match(inject, /QQ_PRESETS\.has\(preset\)/)
+  assert.match(inject, /policy\.strictQQ && !ORDINARY_DSH_PRESETS\.has\(preset\)/,
+    'custom QQ presets without trusted Host evidence must fail closed')
   assert.match(inject, /isQQSession\(ctx\) \? "" : renderUserSettings\(ctx\)/)
   assert.doesNotMatch(inject, /sessionAgentId\([^)]*\) !== "amadeus-qq"/)
 })

@@ -5,6 +5,7 @@ import path from 'node:path'
 import { test } from 'node:test'
 import { QQStore } from '../src/storage.js'
 import { QQCore } from '../src/core.js'
+import { BEHAVIOR_PRESETS } from '../src/permissions.js'
 
 const botId = '10001'
 const policy = { botIds: [botId], groupIds: ['20001', '20002'], privateIds: ['30001'], epoch: 0 }
@@ -46,10 +47,61 @@ function fixture(t, options = {}) {
       maxDeliveries: options.maxDeliveries ?? 500,
     }),
     dsh, transport, policy: options.policy ?? policy,
-    permissionPolicy: options.permissionPolicy ?? {},
+    permissionPolicy: options.permissionPolicy ?? {}, workspaceId: options.workspaceId ?? '',
+    ...(options.clock ? { clock: options.clock } : {}),
   })
   return { file, events, dsh, transport, make }
 }
+
+test('authorized Workspace Scenes have distinct persistent Sessions before the first message', async t => {
+  const f = fixture(t, { workspaceId: 'ws-a' })
+  const core = f.make()
+  core.store.setScenePermissions({ botId, kind: 'group', peerId: '20002' }, { mode: 'observe', overrides: {} })
+  assert.deepEqual(await core.provisionAuthorizedScenes(), { provisioned: 3 })
+  const first = core.listScenePermissions()
+  assert.equal(first.length, 3)
+  assert.equal(new Set(first.map(row => row.sessionId)).size, 3)
+  assert.ok(first.every(row => row.workspaceId === 'ws-a'))
+  assert.equal(first.find(row => row.scene.peerId === '20002').effectiveMode, 'observe')
+  core.close()
+  const restarted = f.make()
+  await restarted.provisionAuthorizedScenes()
+  assert.equal(f.events.filter(event => event[0] === 'create').length, 3)
+  assert.deepEqual(restarted.listScenePermissions().map(row => row.sessionId), first.map(row => row.sessionId))
+  restarted.close()
+})
+
+test('saved behavior batches a live turn and enforces autonomous cooldown without blocking direct mentions', async t => {
+  let now = 100_000
+  const requests = []
+  const f = fixture(t, { clock: () => now, prompt: request => { requests.push(request); return { accepted: true } } })
+  const core = f.make()
+  const scene = { botId, kind: 'group', peerId: '20001' }
+  core.store.setScenePermissions(scene, { mode: 'autonomous-social', overrides: {},
+    behavior: { ...BEHAVIOR_PRESETS['autonomous-social'], quietWindowMs: 5000 } })
+  assert.equal((await core.ingest(group('501', '20001', [{ type: 'text', data: { text: 'one' } }]))).status, 'queued')
+  assert.equal((await core.ingest(group('502', '20001', [{ type: 'text', data: { text: 'two' } }]))).status, 'queued')
+  assert.equal(requests.length, 0)
+  await core.resumePending()
+  assert.equal(requests.length, 1)
+  assert.equal(JSON.parse(requests[0].content[0].text).messages.length, 2)
+  assert.equal((await core.ingest(group('503', '20001', [{ type: 'text', data: { text: 'three' } }]))).status, 'stored')
+  assert.equal((await core.ingest(group('504'))).status, 'queued', 'direct @ bypasses participation cooldown')
+  core.close()
+})
+
+test('paused Scene remains manageable but every effective capability is denied', t => {
+  const f = fixture(t, { policy: { ...policy, pausedScenes: [`${botId}:group:20001`] } })
+  const core = f.make()
+  const scene = { botId, kind: 'group', peerId: '20001' }
+  core.store.setScenePermissions(scene, { mode: 'autonomous-social', overrides: {},
+    behavior: BEHAVIOR_PRESETS['autonomous-social'] })
+  const row = core.listScenePermissions().find(item => item.key === `${botId}:group:20001`)
+  assert.equal(row.permissions.mode, 'autonomous-social')
+  assert.equal(row.permissions.behavior.quietWindowMs, 12000)
+  assert.ok(row.capabilities.every(capability => !capability.effective && capability.reason === 'scene-paused'))
+  core.close()
+})
 
 test('legacy stored media locators are sanitized when read into a DSH Session', async t => {
   const prompts = []
@@ -81,14 +133,75 @@ test('Scene search grant reaches Session creation and revision change removes it
   const core = f.make()
   const first = await core.ingest(group('101'))
   assert.equal(first.status, 'prompted')
-  assert.deepEqual(grants, [true], 'safe-chat may receive the explicit DSH search grant')
+  assert.deepEqual(grants, [false], 'safe-chat does not inherit DSH search')
   await core.setScenePermissions({ botId, kind: 'group', peerId: '20001' },
-    { mode: 'safe-chat', overrides: { 'dsh.search': 'deny' } })
+    { mode: 'safe-chat', overrides: { 'dsh.search': 'allow' } })
   const second = await core.ingest(group('102'))
   assert.equal(second.status, 'prompted')
   assert.notEqual(second.sessionId, first.sessionId)
-  assert.deepEqual(grants, [true, false], 'the new Session must not inherit the revoked search grant')
+  assert.deepEqual(grants, [false, true], 'the new Session receives only the explicit search grant')
   core.close()
+})
+
+test('autonomous group participation merges a short inbound burst and reuses its durable request on restart', async t => {
+  let fail = true
+  const requests = []
+  const f = fixture(t, { prompt: request => {
+    requests.push(request)
+    if (fail) throw new Error('transient model failure')
+    return { accepted: true }
+  } })
+  const scene = { botId, kind: 'group', peerId: '20001' }
+  const core = f.make()
+  core.store.setScenePermissions(scene, { mode: 'autonomous-social', overrides: {} })
+  const plain = id => group(id, '20001', [{ type: 'text', data: { text: `message ${id}` } }])
+  assert.equal((await core.ingest(plain('701'))).status, 'queued')
+  assert.equal((await core.ingest(plain('702'))).status, 'queued')
+  await new Promise(resolve => setTimeout(resolve, 1000))
+  assert.equal(requests.length, 1)
+  assert.equal(JSON.parse(requests[0].content[0].text).messages.length, 2)
+  const requestId = requests[0].requestId
+  core.close()
+  fail = false
+  const restarted = f.make()
+  await restarted.resumePending()
+  assert.equal(requests.at(-1).requestId, requestId)
+  assert.equal(restarted.store.getScene(scene).messages.filter(item => item.prompted).length, 2)
+  restarted.close()
+})
+
+test('live batch waits for quiet after the latest message', async t => {
+  const requests = []
+  const f = fixture(t, { prompt: request => { requests.push(request); return { accepted: true } } })
+  const core = f.make()
+  const scene = { botId, kind: 'group', peerId: '20001' }
+  core.store.setScenePermissions(scene, { mode: 'autonomous-social', overrides: {} })
+  const plain = id => group(id, '20001', [{ type: 'text', data: { text: `message ${id}` } }])
+  await core.ingest(plain('801'))
+  await new Promise(resolve => setTimeout(resolve, 500))
+  await core.ingest(plain('802'))
+  await new Promise(resolve => setTimeout(resolve, 500))
+  assert.equal(requests.length, 0, 'the first message timer must be reset by the second')
+  await new Promise(resolve => setTimeout(resolve, 450))
+  assert.equal(requests.length, 1)
+  assert.equal(JSON.parse(requests[0].content[0].text).messages.length, 2)
+  core.close()
+})
+
+test('changing Workspace revokes the old QQ Session and binds the next turn to the selected Workspace', async t => {
+  const f = fixture(t, { workspaceId: 'ws-a' })
+  const firstCore = f.make()
+  const first = await firstCore.ingest(group('901'))
+  assert.equal(firstCore.store.getScene({ botId, kind: 'group', peerId: '20001' }).workspaceId, 'ws-a')
+  firstCore.close()
+  const nextCore = new QQCore({ store: new QQStore(f.file), dsh: f.dsh, transport: f.transport,
+    policy, workspaceId: 'ws-b' })
+  assert.equal(nextCore.authorizeSessionCapability(first.sessionId, 'qq.send'), false)
+  const second = await nextCore.ingest(group('902'))
+  assert.notEqual(second.sessionId, first.sessionId)
+  assert.equal(nextCore.store.getScene({ botId, kind: 'group', peerId: '20001' }).workspaceId, 'ws-b')
+  assert.ok(f.events.some(event => event[0] === 'cancel' && event[1] === first.sessionId))
+  nextCore.close()
 })
 
 test('one activity sends, uses another tool, sends again, waits and continues same Session', async t => {

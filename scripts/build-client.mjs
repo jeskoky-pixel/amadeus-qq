@@ -40,12 +40,9 @@ for (const marker of [
   'settings.section',
   "id: 'amadeus-qq'",
   "/api/amadeus-qq",
-  "'/scenes'",
-  "'/scenes/permissions'",
-  "'x-amadeus-qq': '1'",
   "credentials: 'same-origin'",
-  '策略占位，尚不可执行',
-  'buildSaveRequest',
+  '打开 Web Console',
+  '开始首次设置',
 ]) {
   if (!bundle.includes(marker)) throw new Error(`client bundle is missing required marker: ${marker}`)
 }

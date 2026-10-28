@@ -88,6 +88,7 @@ test('management route is mounted only when the Host supplies webServer and conn
       callback({
         webServer: { register(route) { routes.push(route); return () => {} } },
         connection: owner,
+        get(name) { return name === 'connection' ? owner : undefined },
         effect(fn) { effects.push(fn()) },
       })
     },
@@ -144,8 +145,8 @@ test('Owner mode never implies shell; implemented QZone follows account and Scen
 
   const qzone = listed.capabilities.find(item => item.id === 'qq.qzone.publish')
   assert.equal(qzone.implemented, true)
-  assert.equal(qzone.effective, true)
-  assert.equal(core.authorizeSessionCapability('owner-session', 'qq.qzone.publish'), true)
+  assert.equal(qzone.effective, false)
+  assert.equal(core.authorizeSessionCapability('owner-session', 'qq.qzone.publish'), false)
 
   const ownerWorkspace = listed.capabilities.find(item => item.id === 'qq.owner.workspace')
   assert.equal(ownerWorkspace.implemented, true)

@@ -1,5 +1,14 @@
 # Amadeus QQ 发行说明
 
+## 1.1.0 候选
+
+- 六页 Owner 鉴权 Web Console 与简化的 DSH 原生设置入口。首次设置可在 GUI 选择 Workspace、NapCat、Bot、唯一 Owner、Scene 白名单和全局拒绝；Token 不回显。
+- 每个授权 Scene 在选定 Workspace 中建立独立持久 Session；支持暂停、恢复、撤权和重启恢复。
+- 五个权限预设及界面“自定义”状态；普通预设不再继承群管理写权限。权限保存使用修订号冲突检查，执行时继续由可信 Scene Guard 裁决。
+- 当前对话可短时合批、等待补充、按权限发送或沉默；合批静默窗口从最后一条消息计时且有最长等待上限。Life 保持长期自主唤醒职责。
+- 账号资料与 QQ 空间配置分离；功能中心标明源码接线、Provider 与平台验收边界。
+- 本候选尚未完成 v1.1 真实 NapCat 入站/外发与 Life 并发实机验收。详见 [v1.1 测试报告](v1.1/TEST_REPORT.md)。PR 不合并、不发布。
+
 ## 1.0.0
 
 - 包版本与收缩后的 v1.0 功能范围对齐；保留包名 `@amadeus/qq` 和 Bundle ID `amadeus-qq`。本次版本收口不新增 QQ 能力。

@@ -162,9 +162,9 @@ test('host guard denies every non-QQ tool for persisted QQ Session and tool args
   const exec = { agent: { session: { id: 'qq-session' } } }
   assert.equal(host.guards.length, 1)
   assert.match(host.guards[0]({ ...exec, name: 'pwsh' }), /non-QQ tools/)
-  assert.equal(host.guards[0]({ ...exec, name: 'web_search' }), undefined,
-    'safe-chat search may execute only after the bound Scene is checked')
-  assert.equal(host.services.get('qq').authorizeSessionCapability('qq-session', 'dsh.search'), true)
+  assert.match(host.guards[0]({ ...exec, name: 'web_search' }), /search permission/,
+    'safe-chat no longer inherits search')
+  assert.equal(host.services.get('qq').authorizeSessionCapability('qq-session', 'dsh.search'), false)
   assert.equal(host.services.get('qq').authorizeSessionCapability('not-bound', 'dsh.search'), false)
   assert.equal(host.guards[0]({ ...exec, name: 'qq_send_message' }), undefined)
   assert.equal(host.guards[0]({ agent: { session: { id: 'unrelated' } }, name: 'pwsh' }), undefined)

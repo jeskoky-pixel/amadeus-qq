@@ -71,18 +71,14 @@ test('built bundle parses and the settings registration is idempotent across act
   assert.equal(registrationCount, 2, 'activation after disposal registers again')
 })
 
-test('client keeps the editable API contract and does not embed sensitive fields', () => {
+test('native Settings stays a short status and first-run console entry', () => {
   for (const marker of [
     '/api/amadeus-qq',
-    "'/scenes'",
-    "'/scenes/permissions'",
+    '/api/amadeus-qq/setup',
+    '/api/amadeus-qq/console',
     "credentials: 'same-origin'",
-    "'x-amadeus-qq': '1'",
-    '策略占位，尚不可执行',
-    '编辑权限',
-    '有未保存修改',
-    'expectedRevision',
-    'buildSaveRequest',
+    '开始首次设置',
+    '打开 Web Console',
   ]) {
     assert.ok(source.includes(marker), marker)
   }
