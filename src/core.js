@@ -20,8 +20,19 @@ export function parsePolicy(raw = {}) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new TypeError('QQ policy must be an object')
   const epoch = raw.epoch ?? 0
   if (!Number.isSafeInteger(epoch) || epoch < 0) throw new TypeError('invalid QQ policy epoch')
+  const sceneRevisions = new Map()
+  if (raw.sceneRevisions !== undefined) {
+    if (!raw.sceneRevisions || typeof raw.sceneRevisions !== 'object' || Array.isArray(raw.sceneRevisions) ||
+      Object.keys(raw.sceneRevisions).length > 10000) throw new TypeError('invalid QQ scene revisions')
+    for (const [key, revision] of Object.entries(raw.sceneRevisions)) {
+      if (!/^[1-9]\d{0,19}:(group|private):[1-9]\d{0,19}$/.test(key) ||
+        !Number.isSafeInteger(revision) || revision < 0) throw new TypeError('invalid QQ scene revision')
+      sceneRevisions.set(key, revision)
+    }
+  }
   return {
     epoch,
+    sceneRevisions,
     botIds: idSet(raw.botIds ?? [], 'botIds'),
     groupIds: idSet(raw.groupIds ?? [], 'groupIds'),
     privateIds: idSet(raw.privateIds ?? [], 'privateIds'),
@@ -49,6 +60,12 @@ export class QQCore {
     this.promptTimers = new Map()
     this.inFlightDeliveries = new Set()
     this.closed = false
+    // A scene can be removed from the allowlist while the plugin is stopped.
+    // Retire any bound Session whose scene is no longer authorized before it
+    // can be reached by a tool or reused after the scene is re-added.
+    for (const row of Object.values(this.store.snapshot().scenes)) {
+      if (row.sessionId && !this.allowed(row)) this.#revokeDisallowedSession(row)
+    }
   }
 
   allowed(raw) {
@@ -64,17 +81,74 @@ export class QQCore {
     return this.permissions.evaluate(scene, this.store.getScenePermissions(scene), capability).allowed
   }
 
+  /**
+   * Bind a Session only to the security posture that created it. Behavior
+   * preferences are deliberately excluded: they can change without replacing
+   * the DSH activity. A global policy epoch is also excluded because adding an
+   * unrelated allowlisted Scene must not interrupt existing conversations.
+   */
+  #securityFingerprint(scene, access = this.store.getScenePermissions(scene)) {
+    const ownerPreset = scene.kind === 'private' &&
+      this.permissions.ownerPrivateIds.has(scene.peerId) &&
+      this.permissions.evaluate(scene, access, 'qq.read').mode === 'owner-agent'
+    const decisions = CAPABILITY_CATALOG.map(capability => [
+      capability.id,
+      this.permissions.evaluate(scene, access, capability.id).allowed,
+    ])
+    return createHash('sha256').update(JSON.stringify({
+      scene: { botId: scene.botId, kind: scene.kind, peerId: scene.peerId },
+      sceneRevision: this.policy.sceneRevisions.get(sceneKey(scene)) ?? 0,
+      workspaceId: this.workspaceId ?? '',
+      agentPreset: ownerPreset ? 'amadeus-qq-owner' : 'amadeus-qq',
+      decisions,
+    })).digest('hex')
+  }
+
+  #bindingSecurityCurrent(row, scene = row) {
+    // Pre-1.1 bindings have no fingerprint. Their epoch still supplies the
+    // original fail-closed policy version check until a controlled update or
+    // a newly created Session records the stronger per-Scene fingerprint.
+    return row.boundSecurityFingerprint
+      ? row.boundSecurityFingerprint === this.#securityFingerprint(scene)
+      : row.authEpoch === this.policy.epoch
+  }
+
+  #revokeDisallowedSession(row) {
+    const sessionId = row?.sessionId
+    if (!sessionId) return
+    try {
+      this.store.retireSession(row, sessionId)
+    } catch {
+      // A concurrent state change already removed the binding; it is not
+      // authorized either way, so never restore it here.
+      return
+    }
+    this.#releaseWaiter(row, sessionId)
+    // The binding is already revoked and durable. Cancellation is best effort
+    // here because this path is synchronous; a failed cancel cannot reauthorize
+    // the retired Session.
+    try {
+      const result = this.dsh.cancelSceneSession?.(sessionId)
+      if (result && typeof result.then === 'function') result.catch(() => {})
+    } catch { /* revocation already recorded */ }
+  }
+
   #requireAuthorizedSession(sessionId, capability = 'qq.read') {
     if (this.closed) throw new Error('QQ plugin is stopped')
     const row = this.store.sceneForSession(sessionId)
-    if (!row || !this.allowed(row) || row.authEpoch !== this.policy.epoch) {
+    if (!row) throw new Error('QQ_UNAUTHORIZED: Session or scene permission is invalid')
+    if (!this.allowed(row)) {
+      this.#revokeDisallowedSession(row)
       throw new Error('QQ_UNAUTHORIZED: Session or scene permission is invalid')
     }
     if ((row.boundPermissionRevision ?? 0) !== this.#permissionRevision(row)) {
       throw new Error('QQ_PERMISSION_CHANGED: old Session must be rebuilt after a Scene permission change')
     }
-    if (this.workspaceId && row.workspaceId !== this.workspaceId) {
+    if ((row.workspaceId ?? '') !== (this.workspaceId ?? '')) {
       throw new Error('QQ_WORKSPACE_CHANGED: old Session belongs to another Workspace')
+    }
+    if (!this.#bindingSecurityCurrent(row)) {
+      throw new Error('QQ_PERMISSION_CHANGED: old Session must be rebuilt after a Scene permission change')
     }
     if (!this.#can(row, capability)) throw new Error(`QQ_PERMISSION_DENIED: ${capability}`)
     return row
@@ -191,23 +265,40 @@ export class QQCore {
       throw forbidden
     }
     return this.#serial(scene, async () => {
-      const currentRevision = this.store.getScenePermissions(scene)?.revision ?? 0
+      const before = this.store.getScene(scene)
+      const currentRevision = before?.permissions?.revision ?? 0
       if (expectedRevision !== undefined && expectedRevision !== currentRevision) {
         const conflict = new Error('QQ_PERMISSION_CONFLICT: Scene permissions changed since the GUI read them')
         conflict.code = 'QQ_PERMISSION_CONFLICT'
         conflict.currentRevision = currentRevision
         throw conflict
       }
+      const beforeFingerprint = this.#securityFingerprint(scene, before?.permissions ?? null)
+      const bindingWasCurrent = Boolean(before?.sessionId) &&
+        (before.boundPermissionRevision ?? 0) === currentRevision &&
+        (before.workspaceId ?? '') === (this.workspaceId ?? '') &&
+        this.#bindingSecurityCurrent(before)
       const permissions = this.store.setScenePermissions(scene, normalized)
       const row = this.store.getScene(scene)
+      const securityChanged = this.#securityFingerprint(scene, row.permissions) !== beforeFingerprint
       if (row.sessionId) {
-        if (typeof this.dsh.cancelSceneSession !== 'function') throw new Error('QQ_SESSION_CANCEL_UNAVAILABLE')
-        const cancelled = await this.dsh.cancelSceneSession(row.sessionId)
-        if (cancelled?.accepted !== true) throw new Error('QQ_SESSION_CANCEL_FAILED')
-        this.#releaseWaiter(scene, row.sessionId)
-        this.store.retireSession(scene, row.sessionId)
+        if (securityChanged) {
+          if (typeof this.dsh.cancelSceneSession !== 'function') throw new Error('QQ_SESSION_CANCEL_UNAVAILABLE')
+          const cancelled = await this.dsh.cancelSceneSession(row.sessionId)
+          if (cancelled?.accepted !== true) throw new Error('QQ_SESSION_CANCEL_FAILED')
+          this.#releaseWaiter(scene, row.sessionId)
+          this.store.retireSession(scene, row.sessionId)
+        } else if (bindingWasCurrent) {
+          // A preference-only update still advances the permission revision.
+          // Rebind the same Session to that revision so a controlled behavior
+          // change is not mistaken for a direct, out-of-band mutation.
+          this.store.bindSession(scene, row.sessionId, this.policy.epoch, this.workspaceId,
+            this.#securityFingerprint(scene, row.permissions))
+        }
       }
-      if (this.workspaceId && this.#can(scene, 'qq.read')) await this.#ensureSession(scene)
+      if (this.workspaceId && this.#can(scene, 'qq.read') && !this.store.getScene(scene).sessionId) {
+        await this.#ensureSession(scene)
+      }
       return permissions
     })
   }
@@ -305,9 +396,9 @@ export class QQCore {
     }
     let row = this.store.getScene(scene)
     if (row?.sessionId) {
-      if (row.authEpoch !== this.policy.epoch ||
-        (row.boundPermissionRevision ?? 0) !== this.#permissionRevision(row) ||
-        (this.workspaceId && row.workspaceId !== this.workspaceId)) {
+      if ((row.boundPermissionRevision ?? 0) !== this.#permissionRevision(row) ||
+        !this.#bindingSecurityCurrent(row, scene) ||
+        (row.workspaceId ?? '') !== (this.workspaceId ?? '')) {
         if (typeof this.dsh.cancelSceneSession !== 'function') throw new Error('QQ_SESSION_CANCEL_UNAVAILABLE')
         const cancelled = await this.dsh.cancelSceneSession(row.sessionId)
         if (cancelled?.accepted !== true) throw new Error('QQ_SESSION_CANCEL_FAILED')
@@ -319,6 +410,7 @@ export class QQCore {
       }
     }
     const revision = this.#permissionRevision(row ?? {})
+    const fingerprint = this.#securityFingerprint(scene)
     const created = await this.dsh.createSceneSession(scene, {
       searchAllowed: this.#can(scene, 'dsh.search'),
       mediaAllowed: this.#can(scene, 'qq.media.read'),
@@ -330,12 +422,13 @@ export class QQCore {
     const sessionId = typeof created === 'string' ? created : created?.sessionId
     if (!sessionId) throw new Error('DSH did not return a Session ID')
     row = this.store.getScene(scene)
-    if (this.closed || this.#permissionRevision(row ?? {}) !== revision || !this.#can(scene, 'qq.read') || !this.allowed(scene)) {
+    if (this.closed || this.#permissionRevision(row ?? {}) !== revision ||
+      this.#securityFingerprint(scene) !== fingerprint || !this.#can(scene, 'qq.read') || !this.allowed(scene)) {
       this.store.recordRetiredSession(sessionId)
       await this.dsh.cancelSceneSession?.(sessionId)
       throw new Error('QQ_PERMISSION_CHANGED: Scene changed during Session creation')
     }
-    row = this.store.bindSession(scene, sessionId, this.policy.epoch, this.workspaceId)
+    row = this.store.bindSession(scene, sessionId, this.policy.epoch, this.workspaceId, fingerprint)
     return row.sessionId
   }
 
@@ -384,7 +477,11 @@ export class QQCore {
     const normalized = normalizeOneBotMessage(raw)
     if (!normalized) return { status: 'ignored' }
     const { scene, message } = normalized
-    if (!this.allowed(scene)) return { status: 'unauthorized' }
+    if (!this.allowed(scene)) {
+      const row = this.store.getScene(scene)
+      if (row?.sessionId) this.#revokeDisallowedSession(row)
+      return { status: 'unauthorized' }
+    }
     if (message.senderId === scene.botId) return { status: 'self_ignored' }
     return this.#serial(scene, async () => {
       const before = this.store.getScene(scene)

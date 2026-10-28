@@ -134,6 +134,11 @@ function validateState(state) {
       (!Number.isSafeInteger(row.boundPermissionRevision) || row.boundPermissionRevision < 0)) {
       throw new Error(`QQ state contains an invalid bound permission revision: ${key}`)
     }
+    if (row.boundSecurityFingerprint !== undefined &&
+      (typeof row.boundSecurityFingerprint !== 'string' ||
+        (row.boundSecurityFingerprint !== '' && !/^[a-f0-9]{64}$/.test(row.boundSecurityFingerprint)))) {
+      throw new Error(`QQ state contains an invalid bound security fingerprint: ${key}`)
+    }
     if (row.sessionId) {
       if (boundSessions.has(row.sessionId)) throw new Error('QQ state binds one DSH Session to multiple scenes')
       boundSessions.add(row.sessionId)
@@ -218,7 +223,7 @@ export class QQStore {
   #row(state, identity) {
     const scene = sceneIdentity(identity)
     const key = sceneKey(scene)
-    state.scenes[key] ??= { ...scene, sessionId: null, authEpoch: 0, boundPermissionRevision: 0, nextSeq: 1, readSeq: 0, presentedSeq: 0, promptedSeq: 0, messages: [], seenIds: [], deliveries: [], deliveryArchive: [] }
+    state.scenes[key] ??= { ...scene, sessionId: null, authEpoch: 0, boundPermissionRevision: 0, boundSecurityFingerprint: '', nextSeq: 1, readSeq: 0, presentedSeq: 0, promptedSeq: 0, messages: [], seenIds: [], deliveries: [], deliveryArchive: [] }
     return state.scenes[key]
   }
 
@@ -271,6 +276,7 @@ export class QQStore {
       if (!state.retiredSessions.includes(sessionId)) state.retiredSessions.push(sessionId)
       row.sessionId = null
       row.boundPermissionRevision = 0
+      row.boundSecurityFingerprint = ''
       return clone(row)
     })
   }
@@ -284,10 +290,14 @@ export class QQStore {
     })
   }
 
-  bindSession(identity, sessionId, authEpoch = 0, workspaceId = '') {
+  bindSession(identity, sessionId, authEpoch = 0, workspaceId = '', securityFingerprint = '') {
     if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 200) throw new TypeError('invalid DSH Session ID')
     if (!Number.isSafeInteger(authEpoch) || authEpoch < 0) throw new TypeError('invalid authorization epoch')
     if (typeof workspaceId !== 'string' || workspaceId.length > 200) throw new TypeError('invalid DSH Workspace ID')
+    if (typeof securityFingerprint !== 'string' ||
+      (securityFingerprint !== '' && !/^[a-f0-9]{64}$/.test(securityFingerprint))) {
+      throw new TypeError('invalid DSH Session security fingerprint')
+    }
     return this.#change(state => {
       const row = this.#row(state, identity)
       if (state.retiredSessions.includes(sessionId)) throw new Error('retired DSH Session cannot be rebound')
@@ -299,6 +309,7 @@ export class QQStore {
       row.authEpoch = authEpoch
       row.workspaceId = workspaceId
       row.boundPermissionRevision = row.permissions?.revision ?? 0
+      row.boundSecurityFingerprint = securityFingerprint
       return clone(row)
     })
   }

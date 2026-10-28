@@ -62,6 +62,9 @@ test('Scene allowlist and pause updates persist with revisions and retain Owner 
   await service.pauseScene({ expectedRevision: 3, botId: '10001', kind: 'group', peerId: '20001', paused: false })
   assert.deepEqual(entry.options.config.policy.pausedScenes, [])
   await assert.rejects(service.setScene({ expectedRevision: 4, botId: '10001', kind: 'private', peerId: '30001', allowed: false }), /Owner private Scene/)
+  await service.setScene({ expectedRevision: 4, botId: '10001', kind: 'group', peerId: '20001', allowed: false })
+  await service.setScene({ expectedRevision: 5, botId: '10001', kind: 'group', peerId: '20001', allowed: true })
+  assert.equal(entry.options.config.policy.sceneRevisions['10001:group:20001'], 1)
 })
 
 test('Workspace Session creation uses the official workspaceId seam and names the Scene', async () => {

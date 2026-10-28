@@ -1,0 +1,29 @@
+# Amadeus 四插件 v1.1 联合验收记录（2026-10-28）
+
+## 候选版本与范围
+
+同一隔离 DSH Desktop Profile、同一官方 DSH Workspace 中启用 QQ 1.1.0、Memory 1.0.1、Life 1.1.0、State 1.1.0。生产 DSH Profile、生产记忆库、生产 NapCat 和 Life 数据未参与本轮测试。四个 PR 均保持开放，未合并、未发布。
+
+## 已验证
+
+| 项目 | 证据 | 结论 |
+| --- | --- | --- |
+| QQ 会话连续性 | 完整测试 295 项：290 通过、0 失败、5 跳过；本轮定向 53/53 通过。隔离 Owner GUI 修改群场景静默窗口、新增无关白名单场景，原群 Session ID 均未改变；移除临时场景后原测试群仍在。 | 普通行为和无关白名单修改不再撤销现有绑定；权限与 Agent Preset 安全切换仍撤权。 |
+| Memory 可信身份 | 完整产品测试 712/712 通过；本轮近期活动、运行时及发行流程定向 36/36 通过。跨 Session 授权通过 Host `sessions.get(id)` 取得完整 Session Header，ID 不符、缺失和撤权均拒绝；QQ Host 存在时普通 Preset 与 QQ Scene 的单元契约通过。 | 先前 `{id}` 与可信 Header 契约冲突已修复，未放宽 QQ Scene 边界。 |
+| Memory 包名与升级 | `@amadeus/memory@1.0.1` 已用于包名和发行补丁；插件 ID 仍为 `dsh-mneme`，默认数据路径不变。源码及 tarball 隐私检查通过。安装文档写明两个 QQ Scene 开关及旧库隔离副本迁移。 | 旧配置沿用；升级时必须停用旧包，避免双实例。 |
+| 同 Profile 联动 | 四插件同时在隔离 Desktop 响应各自 Owner HTTP 接口。QQ、Memory、Life、State 均绑定同一官方 Workspace；重启后绑定保留。State 与 Life 的 Workspace 列表均包含已授权 QQ 群聊及私聊 Session。 | 未观察到 Host 端点冲突；跨插件 Session 成员识别正常。 |
+| Memory Scene 开关 | 在隔离 Owner 设置接口启用 `sceneIsolationEnabled`、`sceneStrictQQ`、`recentActivityEnabled`，硬重启后近期活动运行、两个 Scene 开关生效。 | QQ 记忆首次配置要求已明确，运行配置可持久恢复。 |
+
+## 尚未通过的真实环境验收
+
+1. 官方 DSH `SessionStore.get(id)` 只返回活跃 Session。隔离 Desktop 重启后，旧普通会话与 QQ 会话的近期活动预览安全拒绝 `session-identity-unavailable`；未能在本轮创建并保持两个活跃普通会话完成真实分享。因此“休眠的持久 Session 也可继续跨 Session 分享”尚未实现/验收。若要支持，须引入 Host 可信的持久 Header 解析契约，不能回退到 `{id}` 授权。
+2. 隔离 NapCat 测试端口未监听。运行中的 NapCatQQ Desktop 无隔离数据目录标记，不能确认是否为生产实例，本轮未连接或向 QQ 外发。因此连续对话实机、Life 自主唤醒与 QQ 去重、真实 QQ 长期记忆和权限撤销后的外发阻断仍待同一隔离测试实例复验。
+3. 浏览器中旧 QQ 控制台的 JavaScript 确认框阻塞后续点击。先前首次配置和行为修改的 GUI 操作已有记录；本轮未完成新的普通 DSH 会话模型调用与完整 GUI 复测。不可把 Owner HTTP 接口或合成测试当作 GUI/模型实机通过。
+4. Memory 的真实 Embedding 检索、State 自动演化、Life 定时唤醒及四插件组合下的性能未在本轮重测。上述功能已有各自测试，本轮报告不扩大其真实环境结论。
+
+## 本轮问题清单与处理
+
+- 已修复：QQ 的普通配置变更导致无关 Session 重建；安全变更仍按原权限边界撤权，旧会话历史保留。
+- 已修复：Memory 跨 Session 近期活动的 ID-only 授权与 QQ Host Header 契约冲突。
+- 已完成：Memory 发行名、版本、兼容测试和首次配置/旧库迁移说明。
+- 待验收：休眠持久 Session 的可信 Header 解析、隔离 NapCat 联合实机、浏览器 GUI 与模型工具调用。四个 PR 在这些项目确认前不合并、不发布。

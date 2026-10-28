@@ -101,8 +101,21 @@ export function createSetupService(configEditor, workspaceRegistry) {
       const oldBot = oldPolicy.botIds ?? []
       const changed = JSON.stringify([oldBot, oldPolicy.groupIds ?? [], oldPolicy.privateIds ?? []]) !==
         JSON.stringify([[botId], groups, privatePeers])
+      const oldScenes = oldBot.flatMap(id => [
+        ...(oldPolicy.groupIds ?? []).map(peerId => sceneKey({ botId: id, kind: 'group', peerId })),
+        ...(oldPolicy.privateIds ?? []).map(peerId => sceneKey({ botId: id, kind: 'private', peerId })),
+      ])
+      const newScenes = new Set([
+        ...groups.map(peerId => sceneKey({ botId, kind: 'group', peerId })),
+        ...privatePeers.map(peerId => sceneKey({ botId, kind: 'private', peerId })),
+      ])
+      const sceneRevisions = { ...(oldPolicy.sceneRevisions ?? {}) }
+      for (const key of oldScenes) {
+        if (!newScenes.has(key)) sceneRevisions[key] = (sceneRevisions[key] ?? 0) + 1
+      }
       const nextPolicy = {
         ...oldPolicy,
+        sceneRevisions,
         botIds: [botId], groupIds: groups, privateIds: privatePeers,
         pausedScenes: (oldPolicy.pausedScenes ?? []).filter(key => {
           const [b, kind, peer] = key.split(':')
@@ -144,12 +157,19 @@ export function createSetupService(configEditor, workspaceRegistry) {
       const ownerId = current.permissions?.ownerPrivateIds?.[0]
       if (!body.allowed && scene.kind === 'private' && scene.peerId === ownerId) throw new TypeError('Owner private Scene cannot be removed')
       const values = new Set(current.policy?.[field] ?? [])
+      const wasAllowed = values.has(scene.peerId)
       if (body.allowed) values.add(scene.peerId)
       else values.delete(scene.peerId)
       if (values.size > MAX_SCENES) throw new TypeError('Scene list is full')
+      const sceneRevisions = { ...(current.policy?.sceneRevisions ?? {}) }
+      if (!body.allowed && wasAllowed) {
+        const key = sceneKey(scene)
+        sceneRevisions[key] = (sceneRevisions[key] ?? 0) + 1
+      }
       return {
         ...current, setupRevision: body.expectedRevision + 1,
-        policy: { ...current.policy, [field]: [...values], epoch: (current.policy?.epoch ?? 0) + 1,
+        policy: { ...current.policy, [field]: [...values], sceneRevisions,
+          epoch: (current.policy?.epoch ?? 0) + 1,
           pausedScenes: (current.policy?.pausedScenes ?? []).filter(key => key !== sceneKey(scene)) },
       }
     })

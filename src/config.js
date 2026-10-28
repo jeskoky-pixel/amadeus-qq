@@ -30,6 +30,7 @@ export const Config = z.object({
     botIds: z.array(z.string()).default([]),
     groupIds: z.array(z.string()).default([]),
     privateIds: z.array(z.string()).default([]),
+    sceneRevisions: z.dict(z.natural()).default({}),
     pausedScenes: z.array(z.string()).default([]),
     triggerNames: z.array(z.string()).default([]),
   }).default({}),

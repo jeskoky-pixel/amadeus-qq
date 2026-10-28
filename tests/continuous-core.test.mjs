@@ -71,6 +71,77 @@ test('authorized Workspace Scenes have distinct persistent Sessions before the f
   restarted.close()
 })
 
+test('changing only a Scene behavior parameter preserves its DSH Session and message history', async t => {
+  const f = fixture(t, { workspaceId: 'ws-a' })
+  const core = f.make()
+  const scene = { botId, kind: 'group', peerId: '20001' }
+  const first = await core.ingest(group('601'))
+  assert.ok(first.sessionId)
+  const historyBefore = core.store.getScene(scene).messages.length
+  await core.setScenePermissions(scene, {
+    mode: 'safe-chat', overrides: {},
+    behavior: { ...BEHAVIOR_PRESETS['safe-chat'], quietWindowMs: 10000 },
+  })
+  const row = core.store.getScene(scene)
+  assert.equal(row.sessionId, first.sessionId)
+  assert.equal(row.messages.length, historyBefore)
+  assert.equal(f.events.filter(item => item[0] === 'cancel').length, 0)
+  assert.equal(f.events.filter(item => item[0] === 'create').length, 1)
+  core.close()
+})
+
+test('adding an unrelated allowlisted Scene does not rebuild existing Scene Sessions', async t => {
+  const f = fixture(t, { workspaceId: 'ws-a' })
+  const core = f.make()
+  await core.provisionAuthorizedScenes()
+  const scene = { botId, kind: 'group', peerId: '20001' }
+  const original = core.store.getScene(scene).sessionId
+  const originalHistory = core.store.getScene(scene).messages.length
+  core.close()
+  const changed = new QQCore({
+    store: new QQStore(f.file), dsh: f.dsh, transport: f.transport,
+    workspaceId: 'ws-a',
+    policy: { ...policy, epoch: 1, groupIds: [...policy.groupIds, '20003'] },
+  })
+  await changed.provisionAuthorizedScenes()
+  assert.equal(changed.store.getScene(scene).sessionId, original)
+  assert.equal(changed.store.getScene(scene).messages.length, originalHistory)
+  assert.equal(f.events.filter(item => item[0] === 'cancel' && item[1] === original).length, 0)
+  changed.close()
+})
+
+test('a legacy binding without a security fingerprint still rejects an unknown policy epoch change', async t => {
+  const f = fixture(t)
+  const core = f.make()
+  const scene = { botId, kind: 'group', peerId: '20001' }
+  core.store.bindSession(scene, 'legacy-session', 0)
+  assert.doesNotThrow(() => core.read('legacy-session'))
+  core.close()
+  const changed = new QQCore({
+    store: new QQStore(f.file), dsh: f.dsh, transport: f.transport,
+    policy: { ...policy, epoch: 1 },
+  })
+  assert.throws(() => changed.read('legacy-session'), /QQ_PERMISSION_CHANGED/)
+  changed.close()
+})
+
+test('a removed and re-added Scene cannot revive its old Session across a stopped plugin', async t => {
+  const f = fixture(t, { workspaceId: 'ws-a' })
+  const original = f.make()
+  const first = await original.ingest(group('701'))
+  original.close()
+  const readded = new QQCore({
+    store: new QQStore(f.file), dsh: f.dsh, transport: f.transport,
+    workspaceId: 'ws-a',
+    policy: { ...policy, epoch: 2, sceneRevisions: { '10001:group:20001': 1 } },
+  })
+  const next = await readded.ingest(group('702'))
+  assert.notEqual(next.sessionId, first.sessionId)
+  assert.equal(readded.store.isKnownSession(first.sessionId), true)
+  assert.deepEqual(readded.read(next.sessionId).messages.map(item => item.messageId), ['701', '702'])
+  readded.close()
+})
+
 test('saved behavior batches a live turn and enforces autonomous cooldown without blocking direct mentions', async t => {
   let now = 100_000
   const requests = []
@@ -366,16 +437,25 @@ test('restart reuses persisted Session and replays an unaccepted prompt with sta
   core.close()
 })
 
-test('permission version change blocks old Session tools even when the scene remains listed', async t => {
+test('removing a Scene from the allowlist blocks old Session tools and re-adding cannot resurrect it', async t => {
   const f = fixture(t)
   const original = f.make()
   const { sessionId } = await original.ingest(group('101'))
   original.close()
-  const changed = new QQCore({ store: new QQStore(f.file), dsh: f.dsh, transport: f.transport,
-    policy: { ...policy, epoch: 1 } })
-  assert.throws(() => changed.read(sessionId), /UNAUTHORIZED/)
-  await assert.rejects(changed.send(sessionId, { actionId: 'a', segments: [{ type: 'text', data: { text: 'blocked' } }] }), /UNAUTHORIZED/)
-  changed.close()
+  const removed = new QQCore({ store: new QQStore(f.file), dsh: f.dsh, transport: f.transport,
+    policy: { ...policy, epoch: 1, groupIds: ['20002'] } })
+  assert.throws(() => removed.read(sessionId), /UNAUTHORIZED/)
+  await assert.rejects(removed.send(sessionId, { actionId: 'a', segments: [{ type: 'text', data: { text: 'blocked' } }] }), /UNAUTHORIZED/)
+  assert.equal(removed.store.getScene({ botId, kind: 'group', peerId: '20001' }).sessionId, null)
+  assert.equal(removed.store.isKnownSession(sessionId), true)
+  removed.close()
+  const readded = new QQCore({ store: new QQStore(f.file), dsh: f.dsh, transport: f.transport,
+    policy: { ...policy, epoch: 2 } })
+  const next = await readded.ingest(group('102'))
+  assert.equal(next.status, 'prompted')
+  assert.notEqual(next.sessionId, sessionId)
+  assert.deepEqual(readded.read(next.sessionId).messages.map(item => item.messageId), ['101', '102'])
+  readded.close()
 })
 
 test('Scene permission revision revokes a live Session before any new QQ send', async t => {

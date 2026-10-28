@@ -311,7 +311,7 @@ async function savePermissions(row) {
   try {
     await api('/scenes/permissions', { scene: row.scene, access: { mode: state.draft.mode,
       overrides: state.draft.overrides, behavior: state.draft.behavior }, expectedRevision: state.draft.expectedRevision })
-    notice('会话权限已保存。旧 Session 已撤权，新 Session 已按当前权限建立。')
+    notice('会话设置已保存；当前 Session 绑定以页面显示为准。')
     await refresh()
   } catch (error) { notice(error.status === 409 ? '权限已有变化，请刷新后重新编辑。' : `保存失败：${error.message}`, true) }
   finally { state.busy = false }
