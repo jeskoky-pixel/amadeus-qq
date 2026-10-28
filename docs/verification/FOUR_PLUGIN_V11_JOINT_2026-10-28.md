@@ -2,7 +2,20 @@
 
 ## 候选版本与范围
 
-同一隔离 DSH Desktop Profile、同一官方 DSH Workspace 中启用 QQ 1.1.0、Memory 1.0.1、Life 1.1.0、State 1.1.0。生产 DSH Profile、生产记忆库、生产 NapCat 和 Life 数据未参与本轮测试。四个 PR 均保持开放，未合并、未发布。
+同一隔离 DSH Desktop Profile、同一官方 DSH Workspace 中启用 QQ 1.1.0、Memory 1.0.1、Life 1.1.0、State 1.1.0。生产 DSH Profile、生产记忆库、生产 NapCat 和 Life 数据未参与本轮测试。本报告记录合并前验收；当时四个 PR 均未合并或发布。2026-10-28 四个 PR 已依次合并 main，作为个人电脑实机测试基线；仍未公开发布或部署生产。
+
+## 合并记录（2026-10-28）
+
+四个备份分支均为 `backup/pre-v11-merge-20261028`，指向各仓库合并前的原 main。以下均为普通 Merge Commit；其代码树与对应 PR 最终提交一致。
+
+| 插件 | PR | 合并前 main | Merge Commit |
+| --- | --- | --- | --- |
+| QQ | #2 | `756fdc6f6513b8d2ff9d8309166b0300c0888f9b` | `201daa98bbcfd06d4fd781c85b30c7ea444822c6` |
+| Memory | #5 | `879aa328f1be61bb271b2912f0aeea8c3fefb05b` | `ed080c3372ceceec14bfc2fd75a57b8eaa6e65c3` |
+| State | #3 | `afad15c6e473172cf7b78aae024232e0aa747555` | `af424e62a4a090451a04845b728a90ed72e2f874` |
+| Life | #4 | `105447060d2336ae50dc570bc7de286cd57b40cf` | `f4f2db44fdff314b5ce8aca93cc3373def2207c4` |
+
+合并后仅有 README 与安装说明的文档维护提交。未创建 Tag、GitHub Release、npm 或 DSH Market 发行。下文的真实 NapCat / Life 外发限制仍有效。
 
 ## 已验证
 
