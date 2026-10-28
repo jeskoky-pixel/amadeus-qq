@@ -20,9 +20,10 @@ Web Console 有总览、会话管理、功能中心、账号与 QQ 空间、全�
 
 ## 验证与当前边界
 
-`npm run build` 和 `npm test` 可检查安装包及回归测试。本次 v1.1 候选为 **291 项：286 通过、0 失败、5 跳过**。隔离 DSH Desktop 已验证 GUI 首次设置、Owner 鉴权、Workspace 内的双 Scene Session、权限编辑、暂停和重启恢复。v1.1 候选尚未完成真实 NapCat 入站、模型工具外发及 Life 并发的重新实机验收；[v1.0 真实 QQ 验收](docs/verification/V1_REAL_NAPCAT_2026-10-27.md)只能作为既有能力的历史证据。此 PR 不代表生产部署许可。
+`npm run build` 和 `npm test` 可检查安装包及回归测试。v1.1 开发基线的完整回归为 **295 项：290 通过、0 失败、5 跳过**。隔离 DSH Desktop 已验证 GUI 首次设置、Owner 鉴权、Workspace 内的双 Scene Session、权限编辑、暂停和重启恢复。当前 main 开发基线尚未完成真实 NapCat 入站、模型工具外发及 Life 并发的重新实机验收；[v1.0 真实 QQ 验收](docs/verification/V1_REAL_NAPCAT_2026-10-27.md)只能作为既有能力的历史证据。此次合并仅作为个人电脑实机测试基线，不代表生产部署许可。
 
 - [v1.1 测试报告](docs/v1.1/TEST_REPORT.md)
+- [四插件联合验收与未完成项目](docs/verification/FOUR_PLUGIN_V11_JOINT_2026-10-28.md)
 - [权限预设矩阵](docs/v1.1/PRESET_MATRIX.md)
 - [升级说明](docs/v1.1/UPGRADE.md)
 - [原型差异](docs/v1.1/PROTOTYPE_DIFF.md)
