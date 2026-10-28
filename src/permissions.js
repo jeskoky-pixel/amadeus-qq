@@ -5,6 +5,33 @@ export const MODE_IDS = Object.freeze([
   'observe', 'safe-chat', 'enhanced', 'autonomous-social', 'owner-agent',
 ])
 
+export const BEHAVIOR_PRESETS = Object.freeze({
+  observe: Object.freeze({ activity: 'low', quietWindowMs: 0, waitTimeoutMs: 0, replyCooldownMs: 0, contextBudget: 20 }),
+  'safe-chat': Object.freeze({ activity: 'low', quietWindowMs: 5000, waitTimeoutMs: 30000, replyCooldownMs: 0, contextBudget: 20 }),
+  enhanced: Object.freeze({ activity: 'medium', quietWindowMs: 10000, waitTimeoutMs: 30000, replyCooldownMs: 0, contextBudget: 20 }),
+  'autonomous-social': Object.freeze({ activity: 'medium', quietWindowMs: 12000, waitTimeoutMs: 30000, replyCooldownMs: 15000, contextBudget: 20 }),
+  'owner-agent': Object.freeze({ activity: 'medium', quietWindowMs: 10000, waitTimeoutMs: 30000, replyCooldownMs: 0, contextBudget: 20 }),
+})
+const BEHAVIOR_VALUES = Object.freeze({
+  activity: ['low', 'medium', 'high'], quietWindowMs: [0, 5000, 10000, 12000, 15000],
+  waitTimeoutMs: [0, 15000, 30000, 60000, 120000],
+  replyCooldownMs: [0, 10000, 15000, 30000, 60000], contextBudget: [10, 20, 40],
+})
+
+function validateBehavior(behavior) {
+  if (!behavior || typeof behavior !== 'object' || Array.isArray(behavior) ||
+    Object.keys(behavior).length !== Object.keys(BEHAVIOR_VALUES).length) {
+    throw new TypeError('Scene behavior must be a complete preset-compatible object')
+  }
+  for (const [key, values] of Object.entries(BEHAVIOR_VALUES)) {
+    if (!values.includes(behavior[key])) throw new TypeError(`Invalid Scene behavior: ${key}`)
+  }
+  if (Object.keys(behavior).some(key => !Object.hasOwn(BEHAVIOR_VALUES, key))) {
+    throw new TypeError('Unknown Scene behavior field')
+  }
+  return { ...behavior }
+}
+
 const GROUP_WRITE_DEFAULTS = [
   'qq.group.essence', 'qq.group.notice', 'qq.group.card',
   'qq.group.ban', 'qq.group.whole_ban', 'qq.group.kick',
@@ -12,10 +39,10 @@ const GROUP_WRITE_DEFAULTS = [
 ]
 const MODE_TO_CAPABILITIES = Object.freeze({
   observe: ['qq.read'],
-  'safe-chat': ['qq.read', 'qq.send', 'dsh.search', 'qq.reaction.write', 'qq.poke', 'qq.recall', ...GROUP_WRITE_DEFAULTS],
-  enhanced: ['qq.read', 'qq.send', 'dsh.search', 'qq.media.read', 'qq.reaction.write', 'qq.poke', 'qq.recall', ...GROUP_WRITE_DEFAULTS],
-  'autonomous-social': ['qq.read', 'qq.send', 'dsh.search', 'qq.media.read', 'qq.qzone.publish', 'qq.reaction.write', 'qq.poke', 'qq.recall', ...GROUP_WRITE_DEFAULTS],
-  'owner-agent': ['qq.read', 'qq.send', 'dsh.search', 'qq.media.read', 'qq.qzone.publish', 'dsh.shell', 'qq.reaction.write', 'qq.poke', 'qq.recall', ...GROUP_WRITE_DEFAULTS],
+  'safe-chat': ['qq.read', 'qq.send'],
+  enhanced: ['qq.read', 'qq.send', 'dsh.search', 'qq.media.read', 'qq.reaction.write', 'qq.poke', 'qq.recall'],
+  'autonomous-social': ['qq.read', 'qq.send', 'dsh.search', 'qq.media.read', 'qq.reaction.write', 'qq.poke', 'qq.recall'],
+  'owner-agent': ['qq.read', 'qq.send', 'dsh.search', 'qq.media.read', 'dsh.shell', 'qq.reaction.write', 'qq.poke', 'qq.recall'],
 })
 
 /**
@@ -61,7 +88,7 @@ function validMode(mode) { return MODE_IDS.includes(mode) }
 
 export function validateScenePermissions(access, { requireRevision = false, allowRevision = true } = {}) {
   if (!access || typeof access !== 'object' || Array.isArray(access)) throw new TypeError('Scene permissions must be an object')
-  const keys = new Set(allowRevision ? ['mode', 'overrides', 'revision'] : ['mode', 'overrides'])
+  const keys = new Set(allowRevision ? ['mode', 'overrides', 'behavior', 'revision'] : ['mode', 'overrides', 'behavior'])
   for (const key of Object.keys(access)) if (!keys.has(key)) throw new TypeError(`Unknown Scene permission field: ${key}`)
   if (!validMode(access.mode)) throw new TypeError('Invalid Scene permission mode')
   const overrides = access.overrides ?? {}
@@ -74,7 +101,8 @@ export function validateScenePermissions(access, { requireRevision = false, allo
   if ((requireRevision || access.revision !== undefined) && (!Number.isSafeInteger(access.revision) || access.revision < 1)) {
     throw new TypeError('Invalid Scene permission revision')
   }
-  return { mode: access.mode, overrides: { ...overrides } }
+  return { mode: access.mode, overrides: { ...overrides },
+    ...(access.behavior === undefined ? {} : { behavior: validateBehavior(access.behavior) }) }
 }
 
 function idSet(values, label) {
@@ -208,8 +236,12 @@ export class PermissionEngine {
     if (capability === 'dsh.shell' && (!owner || mode !== 'owner-agent' || !this.ownerTools.has(capability))) {
       return decision(false, 'owner-tool-required')
     }
-    if (capability === 'qq.qzone.publish' && !accountCanPublish(this.accountGrants, scene.botId)) {
-      return decision(false, 'account-publish-required')
+    if (capability === 'qq.qzone.publish') {
+      if (override !== 'allow') return decision(false, 'qzone-publish-explicit')
+      if (!accountCanPublish(this.accountGrants, scene.botId)) return decision(false, 'account-publish-required')
+      if (owner && mode === 'owner-agent') return decision(true, 'scene-allow')
+      if (mode === 'autonomous-social') return decision(true, 'scene-allow')
+      return decision(false, 'qzone-publish-explicit')
     }
     if (override === 'deny') return decision(false, 'scene-deny')
     if (override === 'allow') return decision(true, 'scene-allow')

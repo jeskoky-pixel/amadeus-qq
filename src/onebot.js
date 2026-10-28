@@ -231,6 +231,10 @@ export class OneBotAdapter {
   }
 
   get token() {
+    if (this.config.token) {
+      if (typeof this.config.token !== 'string' || this.config.token.length > 256 || /[\r\n]/.test(this.config.token)) throw new TypeError('invalid token')
+      return this.config.token
+    }
     const name = this.config.tokenEnv
     if (!name) return ''
     if (typeof name !== 'string' || !/^[A-Z][A-Z0-9_]*$/.test(name)) throw new TypeError('invalid tokenEnv')

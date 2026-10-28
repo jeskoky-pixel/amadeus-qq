@@ -1,6 +1,6 @@
 {
   "name": "@amadeus/qq",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Amadeus QQ continuous interaction plugin for DeepSeek Harness",
   "type": "module",
@@ -14,6 +14,7 @@
   "files": [
     "src/*.js",
     "src/*.mjs",
+    "src/console",
     "src/client",
     "lib",
     "scripts",
@@ -22,7 +23,10 @@
     "README.md",
     "docs/RELEASE_NOTES.md",
     "docs/COMPATIBILITY.md",
-    "docs/V1_SCOPE.md"
+    "docs/V1_SCOPE.md",
+    "docs/v1.1",
+    "docs/screenshots",
+    "docs/verification/V1_REAL_NAPCAT_2026-10-27.md"
   ],
   "dsh": {
     "manifestVersion": 1,

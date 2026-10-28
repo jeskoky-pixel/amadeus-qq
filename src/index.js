@@ -28,6 +28,7 @@ import {
   OWNER_NATIVE_TOOLS,
 } from './preset-guard.mjs'
 import { ADMIN_PREFIX, createAdminHandler } from './admin-http.js'
+import { createSetupService } from './setup.js'
 
 export const name = 'amadeus-qq'
 export const inject = ['tools', 'sessionController']
@@ -113,7 +114,10 @@ export function makeDshHost(ctx, config) {
   if (config.agentPreset !== 'amadeus-qq') {
     throw new Error('QQ_UNSAFE_PRESET: the packaged amadeus-qq agentPreset is required')
   }
-  if (typeof config.sessionCwd !== 'string' || !path.isAbsolute(config.sessionCwd)) throw new Error('QQ sessionCwd must be absolute')
+  if (config.workspaceId !== undefined && typeof config.workspaceId !== 'string') throw new Error('QQ workspaceId must be a string')
+  if (!config.workspaceId && (typeof config.sessionCwd !== 'string' || !path.isAbsolute(config.sessionCwd))) {
+    throw new Error('QQ sessionCwd must be absolute for legacy configuration')
+  }
   return {
     async cancelSceneSession(sessionId) {
       if (typeof controller.cancel !== 'function') throw new Error('DSH Session cancellation is unavailable')
@@ -130,9 +134,14 @@ export function makeDshHost(ctx, config) {
       else if (grant?.mediaAllowed === true && grant?.searchAllowed === true) requestedPreset = 'amadeus-qq-media-search'
       else if (grant?.mediaAllowed === true) requestedPreset = 'amadeus-qq-media'
       else if (grant?.searchAllowed === true) requestedPreset = 'amadeus-qq-search'
-      const created = await controller.create({ cwd: config.sessionCwd, agentPreset: requestedPreset })
+      const location = config.workspaceId ? { workspaceId: config.workspaceId } : { cwd: config.sessionCwd }
+      const created = await controller.create({ ...location, agentPreset: requestedPreset })
       if (created?.agentPreset !== requestedPreset) {
         throw new Error('QQ_UNSAFE_PRESET: DSH did not create the requested packaged preset')
+      }
+      if (typeof controller.rename === 'function') {
+        const title = _scene.kind === 'group' ? `群聊 ${_scene.peerId}` : `私聊 ${_scene.peerId}`
+        try { await controller.rename({ sessionId: created.sessionId, title }) } catch { /* Session remains usable; title can be repaired later. */ }
       }
       return created
     },
@@ -194,6 +203,23 @@ function reportTransportDiagnostic(ctx, diagnostic) {
   }
 }
 
+function registerAdmin(ctx, core = null) {
+  if (typeof ctx.inject !== 'function') return
+  try {
+    ctx.inject(['webServer', 'connection'], child => {
+      if (!child?.webServer || typeof child.webServer.register !== 'function' || typeof child.effect !== 'function') return
+      const getService = name => {
+        try { return child.get?.(name) ?? ctx.get?.(name) } catch { return undefined }
+      }
+      const setup = createSetupService(getService('configEditor'), getService('workspaceRegistry'))
+      const handler = createAdminHandler(core, getService('connection'), setup)
+      child.effect(() => child.webServer.register({ kind: 'prefix', path: ADMIN_PREFIX, handler }))
+    })
+  } catch {
+    try { ctx.logger?.warn?.('amadeus-qq: native management API unavailable') } catch {}
+  }
+}
+
 export function apply(ctx, config = {}) {
   // The preset rows mount this same package root with `presetGuard: true`.
   // Branch before any connector startup requirement so the guard is owned by
@@ -205,6 +231,7 @@ export function apply(ctx, config = {}) {
     })
   }
   if (config.enabled !== true) {
+    registerAdmin(ctx)
     ctx.provide('qq', Object.freeze({ getHealth: () => ({ enabled: false, status: 'disabled' }) }))
     return
   }
@@ -221,42 +248,16 @@ export function apply(ctx, config = {}) {
     httpUrl: config.httpUrl,
     wsUrl: config.wsUrl,
     tokenEnv: config.tokenEnv,
+    token: config.token,
   }, {
     onDiagnostic: diagnostic => reportTransportDiagnostic(ctx, diagnostic),
   })
-  const core = new QQCore({ store, dsh, transport, policy: config.policy, permissionPolicy: config.permissions })
+  const core = new QQCore({ store, dsh, transport, policy: config.policy, permissionPolicy: config.permissions, workspaceId: config.workspaceId ?? '' })
   const capabilities = new CapabilityRegistry({ core, store, transport })
 
   // Native management is an optional Host capability. Without a web server or
   // DSH Connection the API stays unavailable; the QQ connector keeps running.
-  if (typeof ctx.inject === 'function') {
-    try {
-      ctx.inject(['webServer', 'connection'], child => {
-        if (!child?.webServer || typeof child.webServer.register !== 'function') return
-        if (typeof child.effect !== 'function') return
-        try {
-          let connection = child.connection
-          if (connection === undefined && typeof child.get === 'function') {
-            try {
-              connection = child.get('connection')
-            } catch {
-              connection = undefined
-            }
-          }
-          const handler = createAdminHandler(core, connection)
-          child.effect(() => child.webServer.register({
-            kind: 'prefix',
-            path: ADMIN_PREFIX,
-            handler,
-          }))
-        } catch (error) {
-          ctx.logger?.warn?.(`amadeus-qq: native management API unavailable: ${error instanceof Error ? error.message : String(error)}`)
-        }
-      })
-    } catch (error) {
-      ctx.logger?.warn?.(`amadeus-qq: native management API unavailable: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  }
+  registerAdmin(ctx, core)
 
   // The guard is global so it also covers a QQ Session restored by DSH before
   // the plugin can attach a fresh per-Agent tool schema restriction.
@@ -816,8 +817,9 @@ export function apply(ctx, config = {}) {
   }))
   ctx.effect(() => () => core.close())
   void Promise.resolve()
+    .then(() => core.provisionAuthorizedScenes())
     .then(() => core.resumePending())
-    .catch(() => reportStartupFailure(ctx, 'resume'))
+    .catch(() => reportStartupFailure(ctx, 'session'))
   void Promise.resolve()
     .then(() => transport.start(event => core.ingest(event)))
     .catch(() => reportStartupFailure(ctx, 'transport'))

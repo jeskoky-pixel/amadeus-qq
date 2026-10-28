@@ -88,6 +88,7 @@ test('management route is mounted only when the Host supplies webServer and conn
       callback({
         webServer: { register(route) { routes.push(route); return () => {} } },
         connection: owner,
+        get(name) { return name === 'connection' ? owner : undefined },
         effect(fn) { effects.push(fn()) },
       })
     },
@@ -144,8 +145,8 @@ test('Owner mode never implies shell; implemented QZone follows account and Scen
 
   const qzone = listed.capabilities.find(item => item.id === 'qq.qzone.publish')
   assert.equal(qzone.implemented, true)
-  assert.equal(qzone.effective, true)
-  assert.equal(core.authorizeSessionCapability('owner-session', 'qq.qzone.publish'), true)
+  assert.equal(qzone.effective, false)
+  assert.equal(core.authorizeSessionCapability('owner-session', 'qq.qzone.publish'), false)
 
   const ownerWorkspace = listed.capabilities.find(item => item.id === 'qq.owner.workspace')
   assert.equal(ownerWorkspace.implemented, true)
@@ -259,7 +260,13 @@ test('PermissionEngine refuses owner-agent as a group default', () => {
 
 test('only an authenticated owner can reconcile a settled unknown send without an automatic retry', async t => {
   const { core, store } = coreFixture(t)
-  store.bindSession(group, 'delivery-session')
+  const seeded = await core.ingest({
+    post_type: 'message', message_type: 'group', self_id: '10001',
+    group_id: '20001', user_id: '30001', message_id: '88000', time: 10,
+    message: [{ type: 'at', data: { qq: '10001' } }, { type: 'text', data: { text: 'seed Session' } }],
+  })
+  const sessionId = seeded.sessionId
+  assert.ok(sessionId)
   let rejectFirst
   let sendCount = 0
   core.transport.send = async () => {
@@ -268,7 +275,7 @@ test('only an authenticated owner can reconcile a settled unknown send without a
     return { messageId: '88002' }
   }
   const segments = [{ type: 'text', data: { text: 'same durable message' } }]
-  const first = core.send('delivery-session', { actionId: 'ambiguous-1', segments })
+  const first = core.send(sessionId, { actionId: 'ambiguous-1', segments })
   assert.equal(sendCount, 1)
   const handler = createAdminHandler(core, owner)
   const resolution = { scene: group, actionId: 'ambiguous-1', outcome: 'failed' }
@@ -278,7 +285,7 @@ test('only an authenticated owner can reconcile a settled unknown send without a
   assert.equal(store.getScene(group).deliveries[0].status, 'unknown')
   rejectFirst(new Error('ambiguous transport failure'))
   assert.equal((await first).status, 'unknown')
-  await assert.rejects(core.send('delivery-session', { actionId: 'ambiguous-2', segments }), /QQ_DELIVERY_UNRESOLVED/)
+  await assert.rejects(core.send(sessionId, { actionId: 'ambiguous-2', segments }), /QQ_DELIVERY_UNRESOLVED/)
   assert.equal(sendCount, 1)
 
   const listed = await invoke(handler, 'GET', '/api/amadeus-qq/scenes')
@@ -300,7 +307,7 @@ test('only an authenticated owner can reconcile a settled unknown send without a
   assert.equal(reconciled.status, 200)
   assert.equal(store.getScene(group).deliveries[0].status, 'failed')
   assert.equal(sendCount, 1, 'manual reconciliation never sends QQ content')
-  assert.equal((await core.send('delivery-session', { actionId: 'confirmed-retry', segments })).status, 'delivered')
+  assert.equal((await core.send(sessionId, { actionId: 'confirmed-retry', segments })).status, 'delivered')
   assert.equal(sendCount, 2)
 
   const delivered = await invoke(handler, 'POST', '/api/amadeus-qq/deliveries/resolve',

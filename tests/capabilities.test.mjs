@@ -8,12 +8,13 @@ import { QQCore } from '../src/core.js'
 import { CapabilityRegistry } from '../src/capabilities.js'
 import { NAPCAT_ACTION_NAMES } from '../src/napcat-action-names.js'
 
-function fixture(t, { permissionPolicy = {} } = {}) {
+function fixture(t, { permissionPolicy = {}, groupPermissions = null } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amadeus-qq-cap-'))
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
   const store = new QQStore(path.join(dir, 'qq.json'))
   const group = { botId: '10001', kind: 'group', peerId: '20001' }
   const privateScene = { botId: '10001', kind: 'private', peerId: '30001' }
+  if (groupPermissions) store.setScenePermissions(group, { mode: 'safe-chat', overrides: groupPermissions })
   store.bindSession(group, 'group-session')
   store.bindSession(privateScene, 'private-session')
   const calls = []
@@ -382,7 +383,9 @@ test('revoking an essence read while the response is in flight prevents disclosu
 })
 
 test('writable message and group actions reserve actionIds, bind targets and deduplicate', async t => {
-  const { registry, core, transport, calls } = fixture(t)
+  const { registry, core, transport, calls } = fixture(t, { groupPermissions: Object.fromEntries([
+    'qq.reaction.write', 'qq.poke', 'qq.recall', 'qq.group.essence', 'qq.group.card', 'qq.group.notice',
+  ].map(id => [id, 'allow'])) })
   const group = { botId: '10001', kind: 'group', peerId: '20001' }
   core.store.appendMessage(group, { messageId: '8101', senderId: '40001', segments: [] })
   core.store.appendMessage(group, { messageId: '8102', senderId: '50001', segments: [] })
@@ -409,8 +412,7 @@ test('writable message and group actions reserve actionIds, bind targets and ded
   await assert.rejects(registry.execute('group-session', 'qq.delete_msg',
     { actionId: 'recall-2', messageId: '8102' }), /RECALL_SCOPE/)
 
-  // Safe Chat group management is normal when the platform account is a group
-  // administrator; NapCat remains the authority that can reject it.
+  // Explicit Scene grants still require platform permission at execution.
   for (const id of ['qq.set_essence_msg', 'qq.delete_essence_msg']) {
     assert.equal((await registry.execute('group-session', id,
       { actionId: id.includes('delete') ? 'essence-delete-1' : 'essence-set-1', messageId: '8101' })).status, 'delivered')
@@ -430,7 +432,7 @@ test('writable message and group actions reserve actionIds, bind targets and ded
     { actionId: 'card-rejected', card: 'x' })
   assert.equal(rejected.status, 'failed')
   assert.equal(rejected.code, 'ONEBOT_REJECTED')
-  await core.setScenePermissions(group, { mode: 'observe', overrides: {} }, { expectedRevision: 0 })
+  await core.setScenePermissions(group, { mode: 'observe', overrides: {} }, { expectedRevision: 1 })
   await assert.rejects(registry.execute('group-session', 'qq.set_group_card',
     { actionId: 'card-revoked', card: 'x' }), /PERMISSION|UNAUTHORIZED|CHANGED/)
   await assert.rejects(registry.execute('private-session', 'qq.set_group_card',
@@ -439,7 +441,9 @@ test('writable message and group actions reserve actionIds, bind targets and ded
 })
 
 test('group moderation actions bind the group, observed user and ledger', async t => {
-  const { registry, core, transport, calls } = fixture(t)
+  const { registry, core, transport, calls } = fixture(t, { groupPermissions: Object.fromEntries([
+    'qq.group.ban', 'qq.group.whole_ban', 'qq.group.kick', 'qq.group.name', 'qq.group.admin', 'qq.group.special_title',
+  ].map(id => [id, 'allow'])) })
   const group = { botId: '10001', kind: 'group', peerId: '20001' }
   core.store.appendMessage(group, { messageId: '8201', senderId: '40001', segments: [] })
   const cases = [
@@ -473,7 +477,7 @@ test('group moderation actions bind the group, observed user and ledger', async 
 })
 
 test('group moderation can manage a current member who has not spoken, with a bounded identity preflight', async t => {
-  const { registry, core, transport, calls } = fixture(t)
+  const { registry, core, transport, calls } = fixture(t, { groupPermissions: { 'qq.group.ban': 'allow', 'qq.group.kick': 'allow', 'qq.group.special_title': 'allow' } })
   const group = { botId: '10001', kind: 'group', peerId: '20001' }
   core.store.appendMessage(group, { messageId: '8301', senderId: '40001', segments: [] })
   const member = { group_id: 20001, user_id: 50002, nickname: 'Silent member' }
@@ -513,7 +517,7 @@ test('group moderation can manage a current member who has not spoken, with a bo
   const pending = registry.execute('group-session', 'qq.set_group_special_title',
     { actionId: 'revoke-preflight', userId: '50004', title: 'x' })
   await started
-  await core.setScenePermissions(group, { mode: 'observe', overrides: {} }, { expectedRevision: 0 })
+  await core.setScenePermissions(group, { mode: 'observe', overrides: {} }, { expectedRevision: 1 })
   release({ group_id: 20001, user_id: 50004 })
   await assert.rejects(pending, /PERMISSION|UNAUTHORIZED|CHANGED/)
   assert.equal(core.store.getScene(group).deliveries.length, before, 'revocation during preflight writes no ledger')

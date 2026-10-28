@@ -76,6 +76,15 @@ function validateState(state) {
     if (row.deliveryArchive !== undefined && !Array.isArray(row.deliveryArchive)) {
       throw new Error(`QQ state contains an invalid delivery archive: ${key}`)
     }
+    if (row.pendingPromptBatch != null &&
+      (!Array.isArray(row.pendingPromptBatch) || row.pendingPromptBatch.length < 1 ||
+        row.pendingPromptBatch.length > 8 || row.pendingPromptBatch.some(seq => !Number.isSafeInteger(seq) || seq < 1))) {
+      throw new Error(`QQ state contains an invalid prompt batch: ${key}`)
+    }
+    if (row.lastAutoPromptAt !== undefined &&
+      (!Number.isSafeInteger(row.lastAutoPromptAt) || row.lastAutoPromptAt < 0)) {
+      throw new Error(`QQ state contains an invalid autonomous prompt timestamp: ${key}`)
+    }
     if (row.permissions !== undefined) {
       try { validateScenePermissions(row.permissions, { requireRevision: true }) }
       catch { throw new Error(`QQ state contains invalid Scene permissions: ${key}`) }
@@ -118,9 +127,17 @@ function validateState(state) {
     if (row.sessionId !== null && (typeof row.sessionId !== 'string' || !row.sessionId)) {
       throw new Error(`QQ state contains an invalid Session: ${key}`)
     }
+    if (row.workspaceId !== undefined && (typeof row.workspaceId !== 'string' || row.workspaceId.length > 200)) {
+      throw new Error(`QQ state contains an invalid Workspace binding: ${key}`)
+    }
     if (row.boundPermissionRevision !== undefined &&
       (!Number.isSafeInteger(row.boundPermissionRevision) || row.boundPermissionRevision < 0)) {
       throw new Error(`QQ state contains an invalid bound permission revision: ${key}`)
+    }
+    if (row.boundSecurityFingerprint !== undefined &&
+      (typeof row.boundSecurityFingerprint !== 'string' ||
+        (row.boundSecurityFingerprint !== '' && !/^[a-f0-9]{64}$/.test(row.boundSecurityFingerprint)))) {
+      throw new Error(`QQ state contains an invalid bound security fingerprint: ${key}`)
     }
     if (row.sessionId) {
       if (boundSessions.has(row.sessionId)) throw new Error('QQ state binds one DSH Session to multiple scenes')
@@ -206,7 +223,7 @@ export class QQStore {
   #row(state, identity) {
     const scene = sceneIdentity(identity)
     const key = sceneKey(scene)
-    state.scenes[key] ??= { ...scene, sessionId: null, authEpoch: 0, boundPermissionRevision: 0, nextSeq: 1, readSeq: 0, presentedSeq: 0, promptedSeq: 0, messages: [], seenIds: [], deliveries: [], deliveryArchive: [] }
+    state.scenes[key] ??= { ...scene, sessionId: null, authEpoch: 0, boundPermissionRevision: 0, boundSecurityFingerprint: '', nextSeq: 1, readSeq: 0, presentedSeq: 0, promptedSeq: 0, messages: [], seenIds: [], deliveries: [], deliveryArchive: [] }
     return state.scenes[key]
   }
 
@@ -230,6 +247,15 @@ export class QQStore {
     })
   }
 
+  markAutoPromptAt(identity, timestamp) {
+    if (!Number.isSafeInteger(timestamp) || timestamp < 0) throw new TypeError('invalid autonomous prompt timestamp')
+    return this.#change(state => {
+      const row = this.#row(state, identity)
+      row.lastAutoPromptAt = timestamp
+      return timestamp
+    })
+  }
+
   sceneForSession(sessionId) {
     if (typeof sessionId !== 'string' || !sessionId) return null
     const matches = Object.values(this.state.scenes).filter(row => row.sessionId === sessionId)
@@ -250,6 +276,7 @@ export class QQStore {
       if (!state.retiredSessions.includes(sessionId)) state.retiredSessions.push(sessionId)
       row.sessionId = null
       row.boundPermissionRevision = 0
+      row.boundSecurityFingerprint = ''
       return clone(row)
     })
   }
@@ -263,9 +290,14 @@ export class QQStore {
     })
   }
 
-  bindSession(identity, sessionId, authEpoch = 0) {
+  bindSession(identity, sessionId, authEpoch = 0, workspaceId = '', securityFingerprint = '') {
     if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 200) throw new TypeError('invalid DSH Session ID')
     if (!Number.isSafeInteger(authEpoch) || authEpoch < 0) throw new TypeError('invalid authorization epoch')
+    if (typeof workspaceId !== 'string' || workspaceId.length > 200) throw new TypeError('invalid DSH Workspace ID')
+    if (typeof securityFingerprint !== 'string' ||
+      (securityFingerprint !== '' && !/^[a-f0-9]{64}$/.test(securityFingerprint))) {
+      throw new TypeError('invalid DSH Session security fingerprint')
+    }
     return this.#change(state => {
       const row = this.#row(state, identity)
       if (state.retiredSessions.includes(sessionId)) throw new Error('retired DSH Session cannot be rebound')
@@ -275,7 +307,9 @@ export class QQStore {
       }
       row.sessionId = sessionId
       row.authEpoch = authEpoch
+      row.workspaceId = workspaceId
       row.boundPermissionRevision = row.permissions?.revision ?? 0
+      row.boundSecurityFingerprint = securityFingerprint
       return clone(row)
     })
   }
@@ -305,6 +339,35 @@ export class QQStore {
       message.prompted = true
       row.promptedSeq = Math.max(row.promptedSeq, throughSeq)
       row.presentedSeq = Math.max(row.presentedSeq, throughSeq)
+      return row.promptedSeq
+    })
+  }
+
+  reservePromptBatch(identity) {
+    return this.#change(state => {
+      const row = this.#row(state, identity)
+      if (row.pendingPromptBatch?.length) return [...row.pendingPromptBatch]
+      const seqs = row.messages.filter(item => item.needsPrompt === true && item.prompted !== true)
+        .slice(0, 8).map(item => item.seq)
+      if (!seqs.length) return []
+      row.pendingPromptBatch = seqs
+      return [...seqs]
+    })
+  }
+
+  markPromptBatch(identity, seqs) {
+    if (!Array.isArray(seqs) || !seqs.length) throw new TypeError('invalid prompt batch')
+    return this.#change(state => {
+      const row = this.#row(state, identity)
+      if (JSON.stringify(row.pendingPromptBatch) !== JSON.stringify(seqs)) throw new Error('QQ_PROMPT_BATCH_CHANGED')
+      for (const seq of seqs) {
+        const item = row.messages.find(message => message.seq === seq)
+        if (!item || item.needsPrompt !== true) throw new Error('QQ_PROMPT_BATCH_MISSING')
+        item.prompted = true
+      }
+      row.promptedSeq = Math.max(row.promptedSeq, ...seqs)
+      row.presentedSeq = Math.max(row.presentedSeq, ...seqs)
+      row.pendingPromptBatch = null
       return row.promptedSeq
     })
   }
