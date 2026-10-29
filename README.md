@@ -1,4 +1,4 @@
-# Amadeus QQ 1.1.0
+# Amadeus QQ 1.1.1
 
 Amadeus QQ 是独立的 DeepSeek Harness 插件，通过本机 NapCat/OneBot 连接 QQ。每个授权群聊或好友私聊使用一个持久 DSH Session；消息读取、模型工具外发、媒体、回执与权限检查均留在插件内。Memory、Life、State 是可选联动，QQ 单独安装也能处理当前对话。
 
@@ -12,6 +12,12 @@ Amadeus QQ 是独立的 DeepSeek Harness 插件，通过本机 NapCat/OneBot 连
 
 默认的普通预设不授予群管理写权限。手工修改权限或行为参数会显示“自定义”；重新选择预设会覆盖该 Scene 的整套预设。“全局设置”可管理对所有 Scene 生效的全局拒绝。可信 Owner、Scene 白名单和 QQ 平台权限始终优先。模型只能通过受控 QQ 工具发送消息，普通文本输出不会自动外发。
 
+## 与本地 AstrBot 轮流使用同一个 QQ
+
+只运行一个登录该 QQ 号的本机 NapCat。Amadeus QQ 与 AstrBot 可以配置同一 NapCat 的本机 OneBot 地址和各自所需的 Token；同一时间只让一方接管消息。在 Amadeus QQ Web Console 的“全局设置 → QQ 接管”点击“暂停 Amadeus，交给 AstrBot”，确认页面显示“已暂停”后再启动 AstrBot。切回时先停用 AstrBot，再点击“恢复由 Amadeus 接管”。开关仅由 DSH Owner 操作，状态保存在 DSH 配置中，重启后仍有效。
+
+暂停会断开 Amadeus 的 WebSocket 接收并拒绝新的 OneBot HTTP 操作、QQ 模型工具外发和 Life 经 QQ 的发送授权；已有 Scene、DSH Session 与历史消息保留。交接前已提交给 NapCat 的请求可能已经执行，无法撤回，结果不确定的动作不会自动重发。AstrBot 接管期间的消息不会自动补入 Amadeus；交接时尚未发起的旧 QQ 唤醒也不会在恢复后延迟回复。
+
 ## 页面与架构
 
 Web Console 有总览、会话管理、功能中心、账号与 QQ 空间、全局设置、运行与诊断六页，支持浅色和深色主题。原生 DSH 设置页仅提供状态与入口。短消息可在有上限的静默窗口内合批；Agent 可等待补充、分条发送或保持沉默。QQ 不拥有长期自主唤醒或冷场定时调度，长期活动由可选的 Life 插件负责。
@@ -20,9 +26,10 @@ Web Console 有总览、会话管理、功能中心、账号与 QQ 空间、全�
 
 ## 验证与当前边界
 
-`npm run build` 和 `npm test` 可检查安装包及回归测试。v1.1 开发基线的完整回归为 **297 项：292 通过、0 失败、5 跳过**。隔离 DSH Desktop 已验证 GUI 首次设置、Owner 鉴权、Workspace 内的双 Scene Session、权限编辑、暂停和重启恢复。当前 main 开发基线尚未完成真实 NapCat 入站、模型工具外发及 Life 并发的重新实机验收；[v1.0 真实 QQ 验收](docs/verification/V1_REAL_NAPCAT_2026-10-27.md)只能作为既有能力的历史证据。此次合并仅作为个人电脑实机测试基线，不代表生产部署许可。
+`npm run build` 和 `npm test` 可检查安装包及回归测试。v1.1.1 完整回归为 **303 项：298 通过、0 失败、5 跳过**。隔离 DSH Desktop 已验证 GUI 首次设置、Owner 鉴权、Workspace 内的双 Scene Session、权限编辑、暂停和重启恢复。新交接开关尚未在重装后的真实 NapCat 与 AstrBot 上完成实机切换；[v1.0 真实 QQ 验收](docs/verification/V1_REAL_NAPCAT_2026-10-27.md)只能作为既有能力的历史证据。此次合并仅作为个人电脑实机测试基线，不代表生产部署许可。
 
 - [v1.1 测试报告](docs/v1.1/TEST_REPORT.md)
+- [1.1.1 本地 AstrBot 交接验收](docs/verification/QQ_ASTRBOT_HANDOFF_2026-10-29.md)
 - [四插件联合验收与未完成项目](docs/verification/FOUR_PLUGIN_V11_JOINT_2026-10-28.md)
 - [权限预设矩阵](docs/v1.1/PRESET_MATRIX.md)
 - [升级说明](docs/v1.1/UPGRADE.md)

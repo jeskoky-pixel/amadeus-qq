@@ -50,6 +50,8 @@ test('shipped console follows the product pages with strict CSP and no mock auth
   }
   assert.match(CONSOLE_HTML, /id="setup-workspace"/)
   assert.match(CONSOLE_HTML, /id="setup-global-deny"/)
+  assert.match(CONSOLE_HTML, /id="handoff-button"/)
+  assert.match(CONSOLE_HTML, /QQ 接管/)
   assert.match(CONSOLE_HTML, /id="scene-detail"/)
   assert.doesNotMatch(CONSOLE_HTML, /<script(?![^>]*src=)|onclick=|onerror=|onload=/i)
   assert.doesNotMatch(CONSOLE_HTML, /100000001|100000002|演示在线|模拟数据/)
@@ -59,10 +61,39 @@ test('shipped console follows the product pages with strict CSP and no mock auth
   assert.match(CONSOLE_JS, /scenes\/permissions/)
   assert.match(CONSOLE_JS, /scenes\/allowlist/)
   assert.match(CONSOLE_JS, /scenes\/pause/)
+  assert.match(CONSOLE_JS, /api\('\/handoff'/)
   assert.match(CONSOLE_JS, /body\.globalDeny/)
   assert.match(CONSOLE_JS, /expectedRevision/)
   assert.match(CONSOLE_JS, /credentials: 'same-origin'/)
   assert.match(CONSOLE_JS, /x-amadeus-qq/)
+})
+
+test('handoff write requires Owner admission and leaves conflicts unchanged', async () => {
+  let saves = 0
+  let pauses = 0
+  const setup = { status: () => ({ revision: 3 }),
+    async setConnection(body, beforePause) {
+      if (body.expectedRevision !== 3) throw new Error('QQ_SETUP_CONFLICT')
+      beforePause?.()
+      saves++
+      return { revision: 4, connect: body.connect }
+    } }
+  const core = { listScenePermissions: () => [], setScenePermissions: async () => {},
+    pauseForHandoff: () => { pauses++ } }
+  const endpoint = '/api/amadeus-qq/handoff'
+  assert.equal((await invoke(createAdminHandler(core, guest, setup), 'POST', endpoint,
+    { expectedRevision: 3, connect: false })).status, 403)
+  assert.equal((await invoke(createAdminHandler(core, owner, setup), 'POST', endpoint,
+    { expectedRevision: 3, connect: false }, { 'x-amadeus-qq': '' })).status, 403)
+  assert.equal((await invoke(createAdminHandler(core, owner, setup), 'POST', endpoint,
+    { expectedRevision: 2, connect: false })).status, 409)
+  assert.equal(saves, 0)
+  assert.equal(pauses, 0)
+  const response = await invoke(createAdminHandler(core, owner, setup), 'POST', endpoint,
+    { expectedRevision: 3, connect: false })
+  assert.equal(response.status, 200)
+  assert.equal(JSON.parse(response.text).data.connect, false)
+  assert.equal(pauses, 1)
 })
 
 test('disabled connector exposes first-run setup and returns no fake active scenes', async () => {

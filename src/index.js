@@ -252,7 +252,8 @@ export function apply(ctx, config = {}) {
   }, {
     onDiagnostic: diagnostic => reportTransportDiagnostic(ctx, diagnostic),
   })
-  const core = new QQCore({ store, dsh, transport, policy: config.policy, permissionPolicy: config.permissions, workspaceId: config.workspaceId ?? '' })
+  const core = new QQCore({ store, dsh, transport, policy: config.policy, permissionPolicy: config.permissions,
+    workspaceId: config.workspaceId ?? '', handoffPaused: config.connect !== true })
   const capabilities = new CapabilityRegistry({ core, store, transport })
 
   // Native management is an optional Host capability. Without a web server or
@@ -817,13 +818,14 @@ export function apply(ctx, config = {}) {
     authorizeSessionCapability: (sessionId, capability) => core.authorizeSessionCapability(sessionId, capability),
   }))
   ctx.effect(() => () => core.close())
-  void Promise.resolve()
-    .then(() => core.provisionAuthorizedScenes())
-    .then(() => core.resumePending())
-    .catch(() => reportStartupFailure(ctx, 'session'))
-  void Promise.resolve()
-    .then(() => transport.start(event => core.ingest(event)))
-    .catch(() => reportStartupFailure(ctx, 'transport'))
+  void Promise.resolve().then(async () => {
+    try { await transport.start(event => core.ingest(event)) }
+    catch { reportStartupFailure(ctx, 'transport'); return }
+    try {
+      await core.provisionAuthorizedScenes()
+      await core.resumePending()
+    } catch { reportStartupFailure(ctx, 'session') }
+  }).catch(() => reportStartupFailure(ctx, 'session'))
   } catch (error) {
     releaseLease()
     throw error

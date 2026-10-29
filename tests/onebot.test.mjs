@@ -85,6 +85,42 @@ test('adapter sends only a selected OneBot action and classifies platform reject
   assert.equal(new OneBotAdapter().status, 'disabled')
 })
 
+test('handoff stops OneBot HTTP and WebSocket admission', async () => {
+  const socket = new EventEmitter()
+  let sent = 0
+  let received = 0
+  const adapter = new OneBotAdapter({ enabled: true, httpUrl: 'http://127.0.0.1:12345',
+    wsUrl: 'ws://127.0.0.1:12346' }, {
+    makeWebSocket: class { constructor() { return socket } },
+    fetch: async () => { sent++; return { ok: true, json: async () => ({ status: 'ok', retcode: 0, data: {} }) } },
+  })
+  await adapter.start(() => { received++ })
+  await adapter.action('get_status', {})
+  adapter.stop()
+  socket.emit('open')
+  assert.equal(adapter.status, 'disabled')
+  await assert.rejects(adapter.action('send_group_msg', {}), { code: 'QQ_HANDOFF_PAUSED' })
+  socket.emit('message', Buffer.from('{"post_type":"message"}'))
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(sent, 1)
+  assert.equal(received, 0)
+})
+
+test('handoff aborts an in-flight HTTP request and reports an unknown outcome', async () => {
+  let entered
+  const started = new Promise(resolve => { entered = resolve })
+  const adapter = new OneBotAdapter({ enabled: true, httpUrl: 'http://127.0.0.1:12345' }, {
+    fetch: async (_url, options) => {
+      entered()
+      return new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(options.signal.reason)))
+    },
+  })
+  const request = adapter.action('send_group_msg', {})
+  await started
+  adapter.stop()
+  await assert.rejects(request, { code: 'QQ_HANDOFF_INTERRUPTED' })
+})
+
 test('record action rejects a response body above its explicit byte limit before JSON parsing', async () => {
   const adapter = new OneBotAdapter({ enabled: true, httpUrl: 'http://127.0.0.1:12345' }, {
     fetch: async () => new Response(JSON.stringify({ status: 'ok', retcode: 0,

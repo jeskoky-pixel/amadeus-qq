@@ -51,6 +51,26 @@ test('first setup rejects self-owner and unknown global-deny capabilities withou
   assert.deepEqual(entry.options.config, { enabled: false })
 })
 
+test('Owner handoff changes only the durable connection bit with CAS', async () => {
+  const { entry, service } = fixture()
+  await service.save({ expectedRevision: 0, workspaceId: 'ws-a', botId: '10001', ownerId: '30001',
+    httpUrl: 'http://127.0.0.1:3000', wsUrl: 'ws://127.0.0.1:3001',
+    groups: ['20001'], privatePeers: [], connect: true })
+  const before = structuredClone(entry.options.config)
+  let paused = 0
+  const result = await service.setConnection({ expectedRevision: 1, connect: false }, () => { paused++ })
+  assert.equal(result.connect, false)
+  assert.equal(result.revision, 2)
+  assert.equal(paused, 1)
+  assert.deepEqual(entry.options.config.policy, before.policy)
+  assert.deepEqual(entry.options.config.permissions, before.permissions)
+  assert.equal(entry.options.config.statePath, before.statePath)
+  await assert.rejects(service.setConnection({ expectedRevision: 1, connect: true }), /QQ_SETUP_CONFLICT/)
+  await assert.rejects(service.setConnection({ expectedRevision: 2, connect: false, groups: [] }), /invalid/)
+  assert.equal((await service.setConnection({ expectedRevision: 2, connect: true })).connect, true)
+  assert.equal(service.status().revision, 3)
+})
+
 test('Scene allowlist and pause updates persist with revisions and retain Owner private Scene', async () => {
   const { entry, service } = fixture()
   await service.save({ expectedRevision: 0, workspaceId: 'ws-a', botId: '10001', ownerId: '30001',

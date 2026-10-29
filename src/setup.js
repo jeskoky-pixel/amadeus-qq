@@ -69,7 +69,7 @@ export function createSetupService(configEditor, workspaceRegistry) {
     }
   }
 
-  async function save(body) {
+  async function save(body, beforePause = null) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new TypeError('setup request is invalid')
     const allowed = new Set(['expectedRevision', 'workspaceId', 'botId', 'ownerId', 'httpUrl', 'wsUrl', 'token', 'groups', 'privatePeers', 'connect', 'globalDeny'])
     if (Object.keys(body).some(key => !allowed.has(key))) throw new TypeError('setup contains unsupported fields')
@@ -95,6 +95,9 @@ export function createSetupService(configEditor, workspaceRegistry) {
     }
     const entry = entryFor(configEditor)
     const profileDir = path.dirname(configEditor.documentPath)
+    const existing = entry.options.config ?? {}
+    if (revisionOf(existing) !== body.expectedRevision) throw new Error('QQ_SETUP_CONFLICT')
+    if (existing.connect === true && !body.connect) await beforePause?.()
     await configEditor.edit(entry, current => {
       if (revisionOf(current) !== body.expectedRevision) throw new Error('QQ_SETUP_CONFLICT')
       const oldPolicy = current.policy ?? {}
@@ -176,6 +179,26 @@ export function createSetupService(configEditor, workspaceRegistry) {
     return status()
   }
 
+  /** One-click Owner handoff: change only the connection bit. In particular,
+   * no Scene ACL, Workspace or permission revision changes here. */
+  async function setConnection(body, beforePause = null) {
+    if (!body || typeof body !== 'object' || Array.isArray(body) ||
+      Object.keys(body).some(key => !['expectedRevision', 'connect'].includes(key)) ||
+      !Number.isSafeInteger(body.expectedRevision) || body.expectedRevision < 0 ||
+      typeof body.connect !== 'boolean') throw new TypeError('handoff request is invalid')
+    const entry = entryFor(configEditor)
+    const existing = entry.options.config ?? {}
+    if (revisionOf(existing) !== body.expectedRevision) throw new Error('QQ_SETUP_CONFLICT')
+    if (!body.connect) await beforePause?.()
+    await configEditor.edit(entry, current => {
+      if (revisionOf(current) !== body.expectedRevision) throw new Error('QQ_SETUP_CONFLICT')
+      if (current.enabled !== true || !current.workspaceId) throw new Error('QQ_SETUP_UNAVAILABLE')
+      if (current.connect === body.connect) return current
+      return { ...current, setupRevision: body.expectedRevision + 1, connect: body.connect }
+    })
+    return status()
+  }
+
   async function pauseScene(body) {
     if (!body || typeof body !== 'object' || Array.isArray(body) ||
       !Number.isSafeInteger(body.expectedRevision) || body.expectedRevision < 0 ||
@@ -228,5 +251,5 @@ export function createSetupService(configEditor, workspaceRegistry) {
     return status()
   }
 
-  return { status, save, setScene, pauseScene, saveAccount }
+  return { status, save, setScene, pauseScene, saveAccount, setConnection }
 }

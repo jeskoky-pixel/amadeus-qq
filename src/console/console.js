@@ -44,6 +44,10 @@ const $ = id => document.getElementById(id)
 const state = { setup: null, runtime: null, selected: '', draft: null, page: 'overview', busy: false }
 const openGroups = new Set()
 
+function transportText(value) {
+  return { connected: '已连接', connecting: '连接中', disconnected: '未连接', disabled: '已暂停' }[value] ?? '未连接'
+}
+
 function el(tag, className, text) {
   const node = document.createElement(tag)
   if (className) node.className = className
@@ -111,15 +115,15 @@ function renderOverview() {
   const rows = sceneRows()
   const workspace = setup.workspaces?.find(item => item.id === setup.workspaceId)
   $('overview-plugin').textContent = setup.enabled ? '已启用' : '待配置'
-  $('overview-transport').textContent = `NapCat ${runtime.health?.transport ?? '未连接'}`
+  $('overview-transport').textContent = setup.connect === false ? 'Amadeus 已暂停' : `NapCat ${transportText(runtime.health?.transport)}`
   $('overview-scenes').textContent = rows.length
   $('overview-sessions').textContent = rows.filter(row => row.health?.sessionActive).length
   $('overview-workspace').textContent = workspace?.title ?? '未选择'
   $('side-status').textContent = setup.enabled ? '插件已启用' : '等待首次设置'
-  $('side-detail').textContent = runtime.health?.transport === 'connected' ? 'NapCat 已连接' : 'NapCat 未连接或已禁用'
+  $('side-detail').textContent = setup.connect === false ? 'QQ 已交接给其他本地客户端' : runtime.health?.transport === 'connected' ? 'NapCat 已连接' : 'NapCat 未连接或已禁用'
   $('side-bot').textContent = setup.botId || '—'
   $('side-owner').textContent = setup.ownerId || '—'
-  $('transport-status').textContent = `NapCat：${runtime.health?.transport ?? '未连接'}`
+  $('transport-status').textContent = `NapCat：${transportText(runtime.health?.transport)}`
   const list = $('overview-list')
   list.replaceChildren()
   for (const row of rows.slice(0, 5)) {
@@ -141,6 +145,27 @@ function renderOverview() {
     item.append(el('span', 'tag ' + (done ? 'success' : 'warn'), done ? '完成' : '待办'), el('b', '', title))
     flow.append(item)
   }
+}
+
+function renderHandoff() {
+  const setup = state.setup
+  const health = state.runtime?.health
+  const button = $('handoff-button')
+  const ready = setup?.enabled === true && Boolean(setup.workspaceId && setup.botId)
+  const paused = setup?.connect === false
+  const stopped = health?.handoffPaused === true || health?.transport === 'disabled'
+  button.disabled = state.busy || !ready
+  button.textContent = !ready ? '请先完成首次配置' : paused ? '恢复由 Amadeus 接管'
+    : stopped ? '完成暂停配置' : '暂停 Amadeus，交给 AstrBot'
+  $('handoff-status').textContent = !ready ? '尚未完成配置'
+    : paused && stopped ? '已暂停，可启用 AstrBot'
+    : paused ? '正在停止连接；请刷新确认后再启用 AstrBot'
+    : stopped ? '运行已暂停，但配置尚未保存；请重试切换'
+    : health?.transport === 'connected' ? 'Amadeus 正在接管 QQ'
+    : 'Amadeus 已接管，正在等待 NapCat 连接'
+  $('handoff-detail').textContent = paused
+    ? 'Amadeus 不接收新消息，也不会通过 QQ 工具外发。切回前请先停用 AstrBot；暂停期间的消息不会自动补入 Amadeus。'
+    : '切换不会删除 QQ Scene 或 DSH Session。暂停前已提交给 NapCat 的操作无法撤回。'
 }
 
 function renderSetup() {
@@ -393,7 +418,7 @@ function renderDiagnostics() {
   const runtime = state.runtime ?? {}
   const rows = sceneRows()
   $('diag-plugin').textContent = setup.enabled ? '已启用' : '未启用'
-  $('diag-transport').textContent = runtime.health?.transport ?? '未连接'
+  $('diag-transport').textContent = transportText(runtime.health?.transport)
   $('diag-workspace').textContent = setup.workspaceId ? '已选择' : '缺失'
   $('diag-scenes').textContent = String(rows.length)
   const list = $('diagnostic-list')
@@ -417,7 +442,7 @@ async function refresh() {
   else notice(`首次设置不可用：${setup.reason.message}`, true)
   if (runtime.status === 'fulfilled') state.runtime = runtime.value
   else notice(`运行状态不可用：${runtime.reason.message}`, true)
-  renderOverview(); renderSetup(); renderScenes(); renderFeatures(); renderAccount(); renderDiagnostics()
+  renderOverview(); renderSetup(); renderHandoff(); renderScenes(); renderFeatures(); renderAccount(); renderDiagnostics()
 }
 
 for (const button of document.querySelectorAll('[data-page]')) button.addEventListener('click', () => show(button.dataset.page))
@@ -427,6 +452,22 @@ $('theme-toggle').addEventListener('click', () => {
 $('scene-filter').addEventListener('input', renderScenes)
 $('refresh').addEventListener('click', () => void refresh())
 $('setup-discard').addEventListener('click', renderSetup)
+$('handoff-button').addEventListener('click', async () => {
+  if (!state.setup?.enabled || state.busy) return
+  const connect = state.setup.connect !== true
+  state.busy = true
+  renderHandoff()
+  try {
+    await api('/handoff', { expectedRevision: state.setup.revision, connect })
+    notice(connect ? 'Amadeus 已恢复接管；请确认 AstrBot 已停用。' : 'Amadeus 已暂停；请等待运行状态确认后启用 AstrBot。')
+  } catch (error) {
+    notice(`切换状态未确认：${error.message}。请刷新核对。`, true)
+  } finally {
+    await refresh()
+    state.busy = false
+    renderHandoff()
+  }
+})
 for (const field of $('setup-form').querySelectorAll('input,select')) field.addEventListener('input', () => { $('setup-state').textContent = '有未保存修改' })
 $('setup-form').addEventListener('submit', async event => {
   event.preventDefault()

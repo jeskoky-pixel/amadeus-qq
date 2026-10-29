@@ -1,5 +1,11 @@
 # Amadeus QQ 发行说明
 
+## 1.1.1 本地交接补丁（未公开发布）
+
+- Owner Web Console 增加“QQ 接管”开关：将同一 NapCat 登录在 Amadeus QQ 与本地 AstrBot 之间手动交接。开关经 DSH 配置服务保存并在重启后恢复，Scene 和 DSH Session 绑定不因切换而重建。
+- 暂停时停止 OneBot WebSocket 接收、拒绝新的 HTTP 操作和 QQ 外发授权，并在配置重载前等待已中断操作的本地记账完成。尚未提交的旧唤醒不在恢复后重放，结果不确定的外发不自动重试。
+- 控制台和 DSH 原生状态使用中文显示交接结果。真实 NapCat 与 AstrBot 的双客户端交接需在用户重装后的隔离环境实机验证。
+
 ## 1.1.0 开发基线（未公开发布）
 
 - 六页 Owner 鉴权 Web Console 与简化的 DSH 原生设置入口。首次设置可在 GUI 选择 Workspace、NapCat、Bot、唯一 Owner、Scene 白名单和全局拒绝；Token 不回显。
