@@ -20,7 +20,7 @@ Web Console 有总览、会话管理、功能中心、账号与 QQ 空间、全�
 
 ## 验证与当前边界
 
-`npm run build` 和 `npm test` 可检查安装包及回归测试。v1.1 开发基线的完整回归为 **295 项：290 通过、0 失败、5 跳过**。隔离 DSH Desktop 已验证 GUI 首次设置、Owner 鉴权、Workspace 内的双 Scene Session、权限编辑、暂停和重启恢复。当前 main 开发基线尚未完成真实 NapCat 入站、模型工具外发及 Life 并发的重新实机验收；[v1.0 真实 QQ 验收](docs/verification/V1_REAL_NAPCAT_2026-10-27.md)只能作为既有能力的历史证据。此次合并仅作为个人电脑实机测试基线，不代表生产部署许可。
+`npm run build` 和 `npm test` 可检查安装包及回归测试。v1.1 开发基线的完整回归为 **297 项：292 通过、0 失败、5 跳过**。隔离 DSH Desktop 已验证 GUI 首次设置、Owner 鉴权、Workspace 内的双 Scene Session、权限编辑、暂停和重启恢复。当前 main 开发基线尚未完成真实 NapCat 入站、模型工具外发及 Life 并发的重新实机验收；[v1.0 真实 QQ 验收](docs/verification/V1_REAL_NAPCAT_2026-10-27.md)只能作为既有能力的历史证据。此次合并仅作为个人电脑实机测试基线，不代表生产部署许可。
 
 - [v1.1 测试报告](docs/v1.1/TEST_REPORT.md)
 - [四插件联合验收与未完成项目](docs/verification/FOUR_PLUGIN_V11_JOINT_2026-10-28.md)
@@ -32,3 +32,5 @@ Web Console 有总览、会话管理、功能中心、账号与 QQ 空间、全�
 ## 开发与隐私
 
 仅在隔离 Profile 和授权测试 QQ 场景验收。不要将生产 DSH Profile、NapCat、QQ Bridge、Memory/Life/State 数据或真实 Token 加入仓库。`npm pack` 生成本地安装包；此仓库不自动发布或部署。项目总览见 [Amadeus-dsh](https://github.com/jeskoky-pixel/Amadeus-dsh)。
+
+Persona 等可信 Host 插件可使用只读的 [已授权 Scene 发现契约](docs/PERSONA_SCENE_CONTRACT.md) 在首条消息前配置场景；QQ 白名单与发送权限仍由 QQ 插件管理。

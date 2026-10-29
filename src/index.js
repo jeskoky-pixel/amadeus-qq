@@ -810,6 +810,7 @@ export function apply(ctx, config = {}) {
 
   ctx.provide('qq', Object.freeze({
     getHealth: () => core.health(),
+    listAuthorizedScenes: () => core.listAuthorizedScenes(),
     // In-process Host contract for cooperating plugins. The Session ID must
     // come from the active DSH Agent, never from model or HTTP arguments.
     resolveTrustedSessionScene: sessionId => core.trustedSceneForSession(sessionId),

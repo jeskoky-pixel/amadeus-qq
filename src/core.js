@@ -365,6 +365,30 @@ export class QQCore {
   }
 
   /**
+   * Read-only Host contract for cooperating plugins such as Persona. Enumerate
+   * current, readable allowlisted Scenes even before any message or Session
+   * exists. This never provisions a Session, exposes credentials or grants QQ
+   * permission. A paused, revoked or qq.read-denied Scene is omitted at once.
+   */
+  listAuthorizedScenes() {
+    if (this.closed || !this.workspaceId) return Object.freeze([])
+    const scenes = []
+    for (const botId of this.policy.botIds) {
+      for (const [kind, peers] of [['group', this.policy.groupIds], ['private', this.policy.privateIds]]) {
+        for (const peerId of peers) {
+          const scene = { botId, kind, peerId }
+          if (!this.allowed(scene) || !this.#can(scene, 'qq.read')) continue
+          scenes.push(Object.freeze({
+            platform: 'qq', kind, id: `${botId}:${peerId}`,
+            workspaceId: this.workspaceId, authorized: true,
+          }))
+        }
+      }
+    }
+    return Object.freeze(scenes)
+  }
+
+  /**
    * Explicit owner reconciliation for one settled unknown send. It only closes
    * the ledger entry as failed; it never sends content, changes permissions, or
    * touches an action whose transport call is still in flight.
