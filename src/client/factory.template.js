@@ -39,6 +39,7 @@ function Panel() {
   }, [])
   const workspace = setup?.workspaces?.find(item => item.id === setup.workspaceId)
   const rows = (setup?.groups?.length ?? 0) + (setup?.privatePeers?.length ?? 0)
+  const transportText = { connected: '已连接', connecting: '连接中', disconnected: '未连接', disabled: '已暂停' }[runtime?.health?.transport] ?? '未连接'
   const metric = (label, value) => React.createElement('div', { className: 'metric' },
     React.createElement('small', null, label), React.createElement('strong', null, value))
   return React.createElement('div', { 'data-amadeus-qq': 'true' },
@@ -48,7 +49,7 @@ function Panel() {
     error ? React.createElement('div', { className: 'error', role: 'status' }, error) : null,
     React.createElement('div', { className: 'summary' },
       metric('插件', setup?.enabled ? '已启用' : '待配置'),
-      metric('NapCat', runtime?.health?.transport ?? '未连接'),
+      metric('NapCat', transportText),
       metric('Bot / Owner', `${setup?.botId || '—'} / ${setup?.ownerId || '—'}`),
       metric('Workspace / 会话', `${workspace?.title || '未选择'} · ${rows} 个`)),
     React.createElement('button', { type: 'button', onClick: () => window.open('/api/amadeus-qq/console', '_blank', 'noopener,noreferrer') },

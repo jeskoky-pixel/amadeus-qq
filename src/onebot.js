@@ -203,7 +203,8 @@ export class OneBotAdapter {
     this.fetch = dependencies.fetch ?? globalThis.fetch
     this.makeWebSocket = dependencies.makeWebSocket
     this.socket = null
-    this.stopped = true
+    this.stopped = config.enabled !== true
+    this.pendingActions = new Set()
     this.reconnectTimer = null
     this.retryMs = 1000
     this.onEvent = null
@@ -257,11 +258,16 @@ export class OneBotAdapter {
     this.status = 'connecting'
     try {
       const factory = this.makeWebSocket ?? ((await import('ws')).default)
+      if (this.stopped) return
       const headers = this.token ? { Authorization: `Bearer ${this.token}` } : {}
       const ws = new factory(this.config.wsUrl, { headers })
       this.socket = ws
-      ws.on('open', () => { this.status = 'connected'; this.retryMs = 1000 })
+      ws.on('open', () => {
+        if (this.stopped) { ws.close?.(); return }
+        this.status = 'connected'; this.retryMs = 1000
+      })
       ws.on('message', data => {
+        if (this.stopped) return
         let event
         try {
           if (data.length > EVENT_SIZE_LIMIT) return
@@ -271,10 +277,11 @@ export class OneBotAdapter {
           return
         }
         Promise.resolve()
-          .then(() => this.onEvent(event))
+          .then(() => { if (!this.stopped) return this.onEvent(event) })
           .catch(() => this.#diagnose('QQ_INBOUND_HANDLER_FAILED'))
       })
       ws.on('error', () => {
+        if (this.stopped) return
         this.status = 'disconnected'
         this.#diagnose('QQ_ONEBOT_SOCKET_ERROR')
       })
@@ -284,6 +291,7 @@ export class OneBotAdapter {
         if (!this.stopped) this.#scheduleReconnect()
       })
     } catch {
+      if (this.stopped) return
       this.status = 'disconnected'
       this.#diagnose('QQ_ONEBOT_CONNECT_FAILED')
       this.#scheduleReconnect()
@@ -302,28 +310,50 @@ export class OneBotAdapter {
   }
 
   async action(name, params, timeoutMs = 10_000, maxResponseBytes = undefined) {
-    if (this.config.enabled !== true) throw new Error('OneBot transport is disabled')
+    if (this.config.enabled !== true || this.stopped) {
+      const error = new Error('QQ_HANDOFF_PAUSED: OneBot transport is disabled')
+      error.code = 'QQ_HANDOFF_PAUSED'
+      throw error
+    }
     if (!/^[a-z][a-z0-9_]{1,80}$/.test(name)) throw new TypeError('invalid OneBot action')
     if (maxResponseBytes !== undefined &&
       (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes < 1)) {
       throw new TypeError('maxResponseBytes must be a positive safe integer')
     }
     const url = new URL(name, `${this.config.httpUrl.replace(/\/+$/, '')}/`)
-    const response = await this.fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}) },
-      body: JSON.stringify(params),
-      signal: AbortSignal.timeout(timeoutMs),
-    })
-    const result = maxResponseBytes === undefined
-      ? await response.json()
-      : await readBoundedJson(response, maxResponseBytes)
-    if (!response.ok || !plainObject(result) || result.status !== 'ok' || result.retcode !== 0) {
-      const error = new Error(`OneBot action ${name} rejected`)
-      error.code = 'ONEBOT_REJECTED'
-      throw error
+    const controller = new AbortController()
+    this.pendingActions.add(controller)
+    try {
+      const response = await this.fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}) },
+        body: JSON.stringify(params),
+        signal: AbortSignal.any([AbortSignal.timeout(timeoutMs), controller.signal]),
+      })
+      const result = maxResponseBytes === undefined
+        ? await response.json()
+        : await readBoundedJson(response, maxResponseBytes)
+      if (this.stopped) {
+        const error = new Error('QQ_HANDOFF_INTERRUPTED: OneBot action outcome is unknown')
+        error.code = 'QQ_HANDOFF_INTERRUPTED'
+        throw error
+      }
+      if (!response.ok || !plainObject(result) || result.status !== 'ok' || result.retcode !== 0) {
+        const error = new Error(`OneBot action ${name} rejected`)
+        error.code = 'ONEBOT_REJECTED'
+        throw error
+      }
+      return result.data
+    } catch (cause) {
+      if (this.stopped && cause?.code !== 'QQ_HANDOFF_INTERRUPTED') {
+        const error = new Error('QQ_HANDOFF_INTERRUPTED: OneBot action outcome is unknown')
+        error.code = 'QQ_HANDOFF_INTERRUPTED'
+        throw error
+      }
+      throw cause
+    } finally {
+      this.pendingActions.delete(controller)
     }
-    return result.data
   }
 
   async send(scene, segments) {
@@ -339,6 +369,7 @@ export class OneBotAdapter {
   stop() {
     this.stopped = true
     this.status = 'disabled'
+    for (const controller of this.pendingActions) controller.abort()
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
     this.reconnectTimer = null
     this.socket?.close?.()

@@ -46,7 +46,7 @@ function messageText(message) {
 }
 
 export class QQCore {
-  constructor({ store, dsh, transport, policy = {}, permissionPolicy = {}, workspaceId = '', clock = () => Date.now() }) {
+  constructor({ store, dsh, transport, policy = {}, permissionPolicy = {}, workspaceId = '', handoffPaused = false, clock = () => Date.now() }) {
     if (!store || !dsh || !transport) throw new TypeError('store, dsh and transport are required')
     this.store = store
     this.dsh = dsh
@@ -60,6 +60,8 @@ export class QQCore {
     this.promptTimers = new Map()
     this.inFlightDeliveries = new Set()
     this.closed = false
+    this.handoffPaused = handoffPaused === true
+    if (this.handoffPaused) this.store.suppressPendingPrompts()
     // A scene can be removed from the allowlist while the plugin is stopped.
     // Retire any bound Session whose scene is no longer authorized before it
     // can be reached by a tool or reused after the scene is re-added.
@@ -135,6 +137,10 @@ export class QQCore {
 
   #requireAuthorizedSession(sessionId, capability = 'qq.read') {
     if (this.closed) throw new Error('QQ plugin is stopped')
+    if (this.handoffPaused && capability.startsWith('qq.') &&
+      !['qq.read', 'qq.owner.tools', 'qq.owner.workspace'].includes(capability)) {
+      throw new Error('QQ_HANDOFF_PAUSED: Amadeus QQ is paused for another client')
+    }
     const row = this.store.sceneForSession(sessionId)
     if (!row) throw new Error('QQ_UNAUTHORIZED: Session or scene permission is invalid')
     if (!this.allowed(row)) {
@@ -198,7 +204,7 @@ export class QQCore {
   }
 
   #schedulePromptBatch(scene, delay = this.#behavior(scene)?.quietWindowMs ?? AUTONOMOUS_QUIET_WINDOW_MS) {
-    if (this.closed) return
+    if (this.closed || this.handoffPaused) return
     const key = sceneKey(scene)
     const prior = this.promptTimers.get(key)
     if (prior) clearTimeout(prior.timer)
@@ -218,6 +224,7 @@ export class QQCore {
   }
 
   async #promptBatch(scene) {
+    if (this.closed || this.handoffPaused) return null
     if (!this.allowed(scene) || !this.#can(scene, 'qq.send')) return null
     const seqs = this.store.reservePromptBatch(scene)
     if (!seqs.length) return null
@@ -233,6 +240,7 @@ export class QQCore {
       behavior: this.#behavior(scene) ?? undefined,
       instruction: 'These messages are one current conversation. Decide whether to reply, use QQ tools, wait briefly for more messages, or remain silent. Use separate guarded sends only when natural. Plain assistant output is not QQ delivery. Life alone owns long-term autonomous wake.',
     }
+    if (this.closed || this.handoffPaused) return null
     await this.dsh.prompt({
       sessionId,
       requestId: `qq-${createHash('sha256').update(`${key}:batch:${seqs.join(',')}`).digest('hex')}`,
@@ -314,7 +322,7 @@ export class QQCore {
       .filter(([, row]) => this.policy.botIds.has(row.botId) &&
         (row.kind === 'group' ? this.policy.groupIds.has(row.peerId) : this.policy.privateIds.has(row.peerId)))
       .map(([key, row]) => {
-        const active = this.allowed(row)
+        const active = !this.handoffPaused && this.allowed(row)
         const permissions = row.permissions ?? null
         const access = permissions === null
           ? null
@@ -338,7 +346,7 @@ export class QQCore {
               implemented: capability.implemented,
               override: access?.overrides?.[capability.id] ?? 'inherit',
               effective: active && capability.implemented === true && decision.allowed,
-              reason: !active ? 'scene-paused' : capability.implemented === true ? decision.reason : 'unimplemented',
+              reason: this.handoffPaused ? 'handoff-paused' : !active ? 'scene-paused' : capability.implemented === true ? decision.reason : 'unimplemented',
             }
           }),
           health: {
@@ -371,7 +379,7 @@ export class QQCore {
    * permission. A paused, revoked or qq.read-denied Scene is omitted at once.
    */
   listAuthorizedScenes() {
-    if (this.closed || !this.workspaceId) return Object.freeze([])
+    if (this.closed || this.handoffPaused || !this.workspaceId) return Object.freeze([])
     const scenes = []
     for (const botId of this.policy.botIds) {
       for (const [kind, peers] of [['group', this.policy.groupIds], ['private', this.policy.privateIds]]) {
@@ -415,7 +423,7 @@ export class QQCore {
   }
 
   async #ensureSession(scene) {
-    if (this.closed || !this.allowed(scene) || !this.#can(scene, 'qq.read')) {
+    if (this.closed || this.handoffPaused || !this.allowed(scene) || !this.#can(scene, 'qq.read')) {
       throw new Error('QQ_UNAUTHORIZED: Scene is no longer active')
     }
     let row = this.store.getScene(scene)
@@ -446,7 +454,7 @@ export class QQCore {
     const sessionId = typeof created === 'string' ? created : created?.sessionId
     if (!sessionId) throw new Error('DSH did not return a Session ID')
     row = this.store.getScene(scene)
-    if (this.closed || this.#permissionRevision(row ?? {}) !== revision ||
+    if (this.closed || this.handoffPaused || this.#permissionRevision(row ?? {}) !== revision ||
       this.#securityFingerprint(scene) !== fingerprint || !this.#can(scene, 'qq.read') || !this.allowed(scene)) {
       this.store.recordRetiredSession(sessionId)
       await this.dsh.cancelSceneSession?.(sessionId)
@@ -458,12 +466,12 @@ export class QQCore {
 
   /** Materialize authorized Workspace members even before the first message. */
   async provisionAuthorizedScenes() {
-    if (!this.workspaceId) return { provisioned: 0 }
+    if (this.handoffPaused || !this.workspaceId) return { provisioned: 0 }
     let provisioned = 0
     for (const botId of this.policy.botIds) {
       for (const [kind, peers] of [['group', this.policy.groupIds], ['private', this.policy.privateIds]]) {
         for (const peerId of peers) {
-          if (this.closed) return { provisioned }
+          if (this.closed || this.handoffPaused) return { provisioned }
           const scene = { botId, kind, peerId }
           if (!this.allowed(scene) || !this.#can(scene, 'qq.read')) continue
           await this.#serial(scene, () => this.#ensureSession(scene))
@@ -475,6 +483,7 @@ export class QQCore {
   }
 
   async #promptMessage(scene, seq) {
+    if (this.closed || this.handoffPaused) return null
     const key = sceneKey(scene)
     const sessionId = await this.#ensureSession(scene)
     const stored = this.store.getScene(scene).messages.find(item => item.seq === seq)
@@ -486,6 +495,7 @@ export class QQCore {
       behavior: this.#behavior(scene) ?? undefined,
       instruction: 'This is one current conversation. Use the activity preference only when deciding whether to participate. Use QQ tools for any QQ send. You may send, continue using tools, wait briefly for messages, or remain silent. Plain assistant output is not a QQ delivery. Life alone owns long-term autonomous wake.',
     }
+    if (this.closed || this.handoffPaused) return null
     await this.dsh.prompt({
       sessionId,
       requestId: `qq-${createHash('sha256').update(`${key}:${seq}`).digest('hex')}`,
@@ -498,6 +508,7 @@ export class QQCore {
   }
 
   async ingest(raw) {
+    if (this.closed || this.handoffPaused) return { status: 'paused' }
     const normalized = normalizeOneBotMessage(raw)
     if (!normalized) return { status: 'ignored' }
     const { scene, message } = normalized
@@ -508,6 +519,7 @@ export class QQCore {
     }
     if (message.senderId === scene.botId) return { status: 'self_ignored' }
     return this.#serial(scene, async () => {
+      if (this.closed || this.handoffPaused) return { status: 'paused' }
       const before = this.store.getScene(scene)
       const key = sceneKey(scene)
       let waiter = this.waiters.get(key)
@@ -536,6 +548,7 @@ export class QQCore {
   }
 
   async resumePending() {
+    if (this.closed || this.handoffPaused) return { resumed: 0 }
     const results = []
     for (const row of Object.values(this.store.snapshot().scenes)) {
       if (!this.allowed(row) || !this.#can(row, 'qq.send')) continue
@@ -573,6 +586,7 @@ export class QQCore {
   }
 
   async wait(sessionId, { afterSeq, timeoutMs = DEFAULT_WAIT_MS } = {}) {
+    if (this.handoffPaused) throw new Error('QQ_HANDOFF_PAUSED: QQ message waiting is paused')
     const row = this.#requireAuthorizedSession(sessionId)
     const behavior = this.#behavior(row)
     if (behavior?.waitTimeoutMs === 0) throw new Error('QQ_PERMISSION_DENIED: observe cannot wait for conversation')
@@ -640,7 +654,7 @@ export class QQCore {
         const delivery = this.store.settleDelivery(row, actionId, 'delivered', messageId)
         return { status: delivery.status, repeated: false, messageId }
       } catch (error) {
-        const status = error?.code === 'ONEBOT_REJECTED' ? 'failed' : 'unknown'
+        const status = error?.code === 'ONEBOT_REJECTED' || error?.code === 'QQ_HANDOFF_PAUSED' ? 'failed' : 'unknown'
         this.store.settleDelivery(row, actionId, status)
         return { status, repeated: false, messageId: null }
       }
@@ -692,7 +706,7 @@ export class QQCore {
         const delivery = this.store.settleDelivery(row, actionId, 'delivered', messageId)
         return { status: delivery.status, repeated: false, messageId }
       } catch (error) {
-        const status = error?.code === 'ONEBOT_REJECTED' ? 'failed' : 'unknown'
+        const status = error?.code === 'ONEBOT_REJECTED' || error?.code === 'QQ_HANDOFF_PAUSED' ? 'failed' : 'unknown'
         this.store.settleDelivery(row, actionId, status)
         return { status, repeated: false, messageId: null }
       }
@@ -794,7 +808,7 @@ export class QQCore {
         const delivery = this.store.settleDelivery(row, actionId, 'delivered', null, fileId)
         return { status: delivery.status, repeated: false, fileId }
       } catch (error) {
-        const status = error?.code === 'ONEBOT_REJECTED' ? 'failed' : 'unknown'
+        const status = error?.code === 'ONEBOT_REJECTED' || error?.code === 'QQ_HANDOFF_PAUSED' ? 'failed' : 'unknown'
         this.store.settleDelivery(row, actionId, status)
         return { status, repeated: false, fileId: null }
       }
@@ -804,7 +818,31 @@ export class QQCore {
   }
 
   health() {
-    return { enabled: !this.closed, transport: this.transport.status ?? 'unknown', scenes: Object.keys(this.store.snapshot().scenes).length, activeWaits: this.waiters.size }
+    return { enabled: !this.closed, handoffPaused: this.handoffPaused, transport: this.transport.status ?? 'unknown', scenes: Object.keys(this.store.snapshot().scenes).length, activeWaits: this.waiters.size }
+  }
+
+  /** Stop admission before the DSH config editor reloads this plugin. Existing
+   * Session bindings remain durable; only stale wake work is dismissed. */
+  async pauseForHandoff() {
+    let suppressed = 0
+    if (!this.handoffPaused) {
+      this.handoffPaused = true
+      for (const { timer } of this.promptTimers.values()) clearTimeout(timer)
+      this.promptTimers.clear()
+      for (const waiter of this.waiters.values()) waiter.resolve()
+      this.waiters.clear()
+      suppressed = this.store.suppressPendingPrompts()
+      this.transport.stop?.()
+    }
+    // An aborted HTTP request can have an unknown platform outcome. Wait for
+    // its local ledger settlement before the config edit reloads this store.
+    const inFlight = this.inFlightDeliveries.size
+    const deadline = Date.now() + 5_000
+    while (this.inFlightDeliveries.size || this.transport.pendingActions?.size) {
+      if (Date.now() >= deadline) throw new Error('QQ_HANDOFF_BUSY: an outgoing action has not settled')
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
+    return { suppressed, inFlight }
   }
 
   statusFor(sessionId) {

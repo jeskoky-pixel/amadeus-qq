@@ -228,6 +228,9 @@ function sendFailure(res, error) {
   if (error?.message === 'QQ_SETUP_UNAVAILABLE' || error?.message === 'QQ_WORKSPACE_UNAVAILABLE') {
     return fail(res, 503, 'QQ_SETUP_UNAVAILABLE', 'DSH settings or Workspace service is unavailable')
   }
+  if (error?.message?.startsWith('QQ_HANDOFF_BUSY')) {
+    return fail(res, 503, 'QQ_HANDOFF_BUSY', 'QQ is paused, but an earlier platform action has not settled; retry after checking diagnostics')
+  }
   if (error instanceof RequestError) return fail(res, error.status, 'QQ_REQUEST_INVALID', error.message)
   if (error instanceof TypeError) return fail(res, 400, 'QQ_REQUEST_INVALID', 'invalid Scene or permission request')
   const message = String(error?.message ?? '')
@@ -271,12 +274,13 @@ export function createAdminHandler(core, connection, setup = null) {
       try { return send(res, 200, { ok: true, data: setup.status() }) }
       catch (error) { return sendFailure(res, error) }
     }
-    if (req.method === 'POST' && ['/setup', '/scenes/allowlist', '/scenes/pause', '/account'].includes(path)) {
+    if (req.method === 'POST' && ['/setup', '/handoff', '/scenes/allowlist', '/scenes/pause', '/account'].includes(path)) {
       if (!setup) return fail(res, 503, 'QQ_SETUP_UNAVAILABLE', 'DSH settings service is unavailable')
       let body
       try { body = await readBody(req) } catch (error) { return sendFailure(res, error) }
       try {
-        const data = path === '/setup' ? await setup.save(body)
+        const data = path === '/setup' ? await setup.save(body, () => core?.pauseForHandoff?.())
+          : path === '/handoff' ? await setup.setConnection(body, () => core?.pauseForHandoff?.())
           : path === '/scenes/allowlist' ? await setup.setScene(body)
           : path === '/scenes/pause' ? await setup.pauseScene(body) : await setup.saveAccount(body)
         return send(res, 200, { ok: true, data })

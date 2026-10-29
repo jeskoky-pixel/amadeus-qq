@@ -211,6 +211,28 @@ export class QQStore {
 
   snapshot() { return clone(this.state) }
 
+  /** Keep received messages, but do not wake an old conversation after a
+   * deliberate handoff to another QQ client. This is one durable write. */
+  suppressPendingPrompts() {
+    const pending = Object.values(this.state.scenes).some(row =>
+      row.pendingPromptBatch?.length || row.messages.some(item => item.needsPrompt && !item.prompted))
+    if (!pending) return 0
+    return this.#change(state => {
+      let suppressed = 0
+      for (const row of Object.values(state.scenes)) {
+        for (const message of row.messages) {
+          if (!message.needsPrompt || message.prompted) continue
+          message.prompted = true
+          row.promptedSeq = Math.max(row.promptedSeq, message.seq)
+          row.presentedSeq = Math.max(row.presentedSeq, message.seq)
+          suppressed++
+        }
+        row.pendingPromptBatch = null
+      }
+      return suppressed
+    })
+  }
+
   #change(edit) {
     const next = clone(this.state)
     const result = edit(next)

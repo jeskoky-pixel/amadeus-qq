@@ -39,19 +39,82 @@ function fixture(t, options = {}) {
   const transport = {
     status: 'mock',
     send: options.send ?? (async (_scene, segments) => { events.push(['send', segments]); return { messageId: '90001' } }),
-    stop() {},
+    stop() { options.stop?.() },
   }
-  const make = () => new QQCore({
+  const make = (handoffPaused = false) => new QQCore({
     store: new QQStore(file, {
       maxMessages: options.maxMessages ?? 500,
       maxDeliveries: options.maxDeliveries ?? 500,
     }),
     dsh, transport, policy: options.policy ?? policy,
-    permissionPolicy: options.permissionPolicy ?? {}, workspaceId: options.workspaceId ?? '',
+    permissionPolicy: options.permissionPolicy ?? {}, workspaceId: options.workspaceId ?? '', handoffPaused,
     ...(options.clock ? { clock: options.clock } : {}),
   })
   return { file, events, dsh, transport, make }
 }
+
+test('handoff suppresses stale wakes and sends while preserving a Scene Session across restart', async t => {
+  const f = fixture(t, { workspaceId: 'ws-a', prompt: () => { throw new Error('DSH temporarily unavailable') } })
+  const scene = { botId, kind: 'private', peerId: '30001' }
+  const core = f.make()
+  await assert.rejects(core.ingest(privateMessage('801')), /temporarily unavailable/)
+  const sessionId = core.store.getScene(scene).sessionId
+  assert.ok(sessionId)
+  assert.equal(core.store.getScene(scene).messages[0].prompted, false)
+  const pause = await core.pauseForHandoff()
+  assert.equal(pause.suppressed, 1)
+  assert.equal(core.authorizeSessionCapability(sessionId, 'qq.send'), false)
+  await assert.rejects(core.send(sessionId, { actionId: 'late-send', segments: [{ type: 'text', data: { text: 'late' } }] }),
+    /QQ_HANDOFF_PAUSED/)
+  assert.equal(core.store.getScene(scene).deliveries.length, 0)
+  assert.deepEqual(await core.ingest(privateMessage('802')), { status: 'paused' })
+  assert.deepEqual(await core.resumePending(), { resumed: 0 })
+  core.close()
+
+  const paused = f.make(true)
+  assert.equal(paused.store.getScene(scene).sessionId, sessionId)
+  assert.equal(paused.store.getScene(scene).messages[0].prompted, true)
+  assert.deepEqual(await paused.provisionAuthorizedScenes(), { provisioned: 0 })
+  assert.deepEqual(await paused.resumePending(), { resumed: 0 })
+  assert.equal(paused.statusFor(sessionId).handoffPaused, true)
+  paused.close()
+
+  const resumed = f.make()
+  assert.equal(resumed.store.getScene(scene).sessionId, sessionId)
+  assert.deepEqual(await resumed.resumePending(), { resumed: 0 })
+  const args = { actionId: 'fresh-send', segments: [{ type: 'text', data: { text: 'fresh' } }] }
+  assert.equal((await resumed.send(sessionId, args)).status, 'delivered')
+  assert.equal((await resumed.send(sessionId, args)).repeated, true)
+  assert.equal(f.events.filter(event => event[0] === 'send').length, 1)
+  assert.equal(f.events.filter(event => event[0] === 'cancel').length, 0)
+  resumed.close()
+})
+
+test('handoff waits for an interrupted delivery ledger before config reload', async t => {
+  let started
+  let interrupt
+  const entered = new Promise(resolve => { started = resolve })
+  const f = fixture(t, {
+    workspaceId: 'ws-a',
+    send: () => new Promise((_resolve, reject) => { interrupt = reject; started() }),
+    stop: () => interrupt?.(new Error('request aborted')),
+  })
+  const core = f.make()
+  const scene = { botId, kind: 'private', peerId: '30001' }
+  await core.provisionAuthorizedScenes()
+  const sessionId = core.store.getScene(scene).sessionId
+  const outgoing = core.send(sessionId, { actionId: 'in-flight', segments: [{ type: 'text', data: { text: 'hello' } }] })
+  await entered
+  const paused = await core.pauseForHandoff()
+  assert.equal(paused.inFlight, 1)
+  assert.equal((await outgoing).status, 'unknown')
+  assert.equal(core.store.getScene(scene).deliveries[0].status, 'unknown')
+  core.close()
+  const resumed = f.make()
+  assert.equal(resumed.store.getScene(scene).sessionId, sessionId)
+  assert.equal((await resumed.send(sessionId, { actionId: 'in-flight', segments: [{ type: 'text', data: { text: 'hello' } }] })).repeated, true)
+  resumed.close()
+})
 
 test('authorized Workspace Scenes have distinct persistent Sessions before the first message', async t => {
   const f = fixture(t, { workspaceId: 'ws-a' })
