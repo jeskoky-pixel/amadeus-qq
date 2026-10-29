@@ -1,4 +1,6 @@
-# Amadeus QQ 1.1.1
+# Amadeus QQ 1.2.0（发行候选）
+
+此候选版提供预构建 DSH Bundle，可从隔离的 DSH 插件管理器安装 `.tgz`。已在官方 DSH Desktop `0.2.1-rc.3` 附带的运行时验证；公开 npm 与市场收录尚未执行。安装、升级、卸载和数据保留见 [v1.2 安装说明](docs/INSTALL_V1_2.md)、[升级政策](docs/UPGRADE_POLICY.md) 与 [数据迁移](docs/DATA_MIGRATION.md)。此前 1.1.1 的验收记录保留在下文。
 
 Amadeus QQ 是独立的 DeepSeek Harness 插件，通过本机 NapCat/OneBot 连接 QQ。每个授权群聊或好友私聊使用一个持久 DSH Session；消息读取、模型工具外发、媒体、回执与权限检查均留在插件内。Memory、Life、State 是可选联动，QQ 单独安装也能处理当前对话。
 
