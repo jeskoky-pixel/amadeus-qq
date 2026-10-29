@@ -11,6 +11,7 @@ const requirements = {
   '@amadeus/persona': ['src/index.js', 'src/client.js', 'src/console/index.html', 'src/console/console.js', 'src/console/console.css', 'cordis.patch.yml']
 }
 for (const required of Object.values(requirements)) required.push('assets/market-icon.png', 'screenshots.json', 'docs/INSTALL_V1_2.md')
+if (pkg.license === 'MIT') requirements[pkg.name]?.push('LICENSE')
 const expectedId = pkg.name === '@amadeus/memory' ? 'dsh-mneme' : pkg.name.replace('@amadeus/', 'amadeus-')
 const errors = []
 const warnings = []

@@ -1,6 +1,7 @@
 {
   "name": "@amadeus/qq",
   "version": "1.2.0",
+  "license": "MIT",
   "private": true,
   "description": "Amadeus QQ continuous interaction plugin for DeepSeek Harness",
   "type": "module",
@@ -21,6 +22,7 @@
     "cordis.patch.yml",
     "preset.patch.yml",
     "README.md",
+    "LICENSE",
     "docs/RELEASE_NOTES.md",
     "docs/COMPATIBILITY.md",
     "docs/V1_SCOPE.md",

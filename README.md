@@ -43,3 +43,7 @@ Web Console 有总览、会话管理、功能中心、账号与 QQ 空间、全�
 仅在隔离 Profile 和授权测试 QQ 场景验收。不要将生产 DSH Profile、NapCat、QQ Bridge、Memory/Life/State 数据或真实 Token 加入仓库。`npm pack` 生成本地安装包；此仓库不自动发布或部署。项目总览见 [Amadeus-dsh](https://github.com/jeskoky-pixel/Amadeus-dsh)。
 
 Persona 等可信 Host 插件可使用只读的 [已授权 Scene 发现契约](docs/PERSONA_SCENE_CONTRACT.md) 在首条消息前配置场景；QQ 白名单与发送权限仍由 QQ 插件管理。
+
+## 许可证与发行
+
+本仓库采用 [MIT 许可证](LICENSE)。v1.2 候选保留 `private:true`，不通过 npm 发布；正式安装源计划为固定版本的 GitHub Release 预构建包。公开创建 Release 和提交 DSH Market 收录前仍须完成验收并获得发行确认。

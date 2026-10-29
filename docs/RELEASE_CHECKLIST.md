@@ -18,6 +18,6 @@
 
 ## 发行授权
 
-- [ ] 核实 `@amadeus` npm scope 的实际发布权限和本包发行许可证；解决 `private: true` / `UNLICENSED` 等阻碍，不擅自改名或更换许可证。
+- [ ] 核实包内 MIT `LICENSE` 与 `package.json` 一致。v1.2 首发只走固定 GitHub Release 包，保留 `private:true` 防止误发 npm；未来若改走 npm，先核实 `@amadeus` Scope 权限并另行审查。
 - [ ] 准备不可变的 `v1.2.0` Tag、GitHub Release 说明、可下载 `.tgz`、SHA-256、Schema Version、升级/回滚说明；正式创建公开资源前等待 Owner 确认。
 - [ ] `awesome-dsh-plugin` 只增加本仓库对应的 `data/plugins/*.yml`；不编辑生成 README。市场展示、下载源和安装行为实际验证后再提交外部收录 PR。
