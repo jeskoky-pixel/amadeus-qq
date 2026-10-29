@@ -1,5 +1,6 @@
 url: https://github.com/jeskoky-pixel/amadeus-qq
 name: jeskoky-pixel/amadeus-qq
+tarball: https://github.com/jeskoky-pixel/amadeus-qq/releases/download/v1.2.0/amadeus-qq-1.2.0.tgz
 category: remote
 description:
   en: Connects authorized QQ chats through NapCat to persistent DeepSeek Harness sessions with scene permissions.
