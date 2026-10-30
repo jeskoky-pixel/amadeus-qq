@@ -1,11 +1,11 @@
 # QQ 固定发行检查单
 
-本页是每次发布的门禁，不等同于发行许可。v1.2.0 公开 npm、公开 Release 和市场收录须另获 Owner 一次性确认。
+本页是每次发布的质量门禁。v1.2.0 的公开 npm 与 GitHub Release 已获 Owner 授权；第三方市场投稿仍需独立核查。
 
 ## 源码与包
 
 - [ ] 从最新 `main` 创建开发分支；记录源码 Commit SHA、上一个稳定 Tag 和 PR。
-- [ ] 核对包名 `@amadeus/qq`、运行 ID `amadeus-qq`、版本、`dsh.bundle`、`dsh.client`、`engines.dsh`、入口及 `cordis.patch.yml`。
+- [ ] 核对包名 `@fg-lab/amadeus-qq`、运行 ID `amadeus-qq`、版本、`dsh.bundle`、`dsh.client`、`engines.dsh`、入口及 `cordis.patch.yml`。
 - [ ] `npm ci --ignore-scripts`、`npm run build`、`npm test`、`npm run verify:release` 通过；额外运行必要的跨插件契约测试。
 - [ ] 用 `npm pack --ignore-scripts` 产生 `.tgz`，检查内容、SHA-256 与预构建 Client/Console/翻译/图标，确认没有凭据、数据库、日志和个人资料。
 - [ ] 在目标官方 DSH Desktop 隔离 Profile 实测单独安装、五插件联合安装、禁用/启用、重启、旧版升级、卸载和恢复。只声明实测过的 DSH 版本。
@@ -18,6 +18,6 @@
 
 ## 发行授权
 
-- [ ] 核实包内 MIT `LICENSE` 与 `package.json` 一致。v1.2 首发只走固定 GitHub Release 包，保留 `private:true` 防止误发 npm；未来若改走 npm，先核实 `@amadeus` Scope 权限并另行审查。
-- [ ] 准备不可变的 `v1.2.0` Tag、GitHub Release 说明、可下载 `.tgz`、SHA-256、Schema Version、升级/回滚说明；正式创建公开资源前等待 Owner 确认。
+- [ ] 核实包内 MIT `LICENSE` 与 `package.json` 一致；确认 `@fg-lab` 发布权限、`publishConfig.access=public`、npm 登录和 2FA 人工流程。
+- [ ] 准备不可变的 `v1.2.0` Tag、GitHub Release 说明、可下载 `.tgz`、SHA-256、Schema Version、升级/回滚说明；正式创建前完成全部质量门禁，并确认 Tag、源码和 tarball 一致。
 - [ ] `awesome-dsh-plugin` 只增加本仓库对应的 `data/plugins/*.yml`；不编辑生成 README。市场展示、下载源和安装行为实际验证后再提交外部收录 PR。

@@ -6,7 +6,7 @@ Amadeus QQ 是独立的 DeepSeek Harness 插件，通过本机 NapCat/OneBot 连
 
 ## 首次使用
 
-1. 在 DSH Desktop 的插件管理器安装 `@amadeus/qq` 包。打开插件设置页，进入受 DSH Owner 鉴权保护的 Web Console。
+1. 在 DSH Desktop 的插件管理器安装 `@fg-lab/amadeus-qq` 包。打开插件设置页，进入受 DSH Owner 鉴权保护的 Web Console。
 2. 在“全局设置”选择已有 DSH Workspace，填写 Bot QQ 号、唯一 Owner QQ 号、本机 NapCat HTTP/WebSocket 地址及需要的 Access Token。Token 保存后不回显。
 3. 添加授权群号或好友 QQ 号；Owner 私聊自动加入白名单。保存并应用，按页面提示连接 NapCat。
 4. 到“会话管理”选择预设，查看每项**实际生效**的权限，保存。授权 Scene 会在所选 Workspace 中建立独立 Session；可暂停、恢复或移出白名单。
@@ -46,4 +46,4 @@ Persona 等可信 Host 插件可使用只读的 [已授权 Scene 发现契约](d
 
 ## 许可证与发行
 
-本仓库采用 [MIT 许可证](LICENSE)。v1.2 候选保留 `private:true`，不通过 npm 发布；正式安装源计划为固定版本的 GitHub Release 预构建包。公开创建 Release 和提交 DSH Market 收录前仍须完成验收并获得发行确认。
+本仓库采用 [MIT 许可证](LICENSE)。v1.2 发行包已配置为公开 npm 包；GitHub Release、npm 实际发布及 DSH Market 收录状态以发行验收报告为准。

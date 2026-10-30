@@ -4,15 +4,15 @@ import { resolve } from 'node:path'
 
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'))
 const requirements = {
-  '@amadeus/qq': ['src/index.js', 'lib/client.js', 'src/console/index.html', 'src/console/console.js', 'src/console/console.css', 'cordis.patch.yml', 'preset.patch.yml'],
-  '@amadeus/memory': ['lib/index.js', 'lib/client.js', 'cordis.patch.yml', 'runtime-manifest.json'],
-  '@amadeus/life': ['src/index.js', 'lib/client.js', 'cordis.patch.yml', 'icon.svg', 'locale/zh.json', 'locale/en.json'],
-  '@amadeus/state': ['src/index.js', 'lib/client.js', 'cordis.patch.yml', 'icon.svg', 'locale/zh.json', 'locale/en.json'],
-  '@amadeus/persona': ['src/index.js', 'src/client.js', 'src/console/index.html', 'src/console/console.js', 'src/console/console.css', 'cordis.patch.yml']
+  '@fg-lab/amadeus-qq': ['src/index.js', 'lib/client.js', 'src/console/index.html', 'src/console/console.js', 'src/console/console.css', 'cordis.patch.yml', 'preset.patch.yml'],
+  '@fg-lab/amadeus-memory': ['lib/index.js', 'lib/client.js', 'cordis.patch.yml', 'runtime-manifest.json'],
+  '@fg-lab/amadeus-life': ['src/index.js', 'lib/client.js', 'cordis.patch.yml', 'icon.svg', 'locale/zh.json', 'locale/en.json'],
+  '@fg-lab/amadeus-state': ['src/index.js', 'lib/client.js', 'cordis.patch.yml', 'icon.svg', 'locale/zh.json', 'locale/en.json'],
+  '@fg-lab/amadeus-persona': ['src/index.js', 'src/client.js', 'src/console/index.html', 'src/console/console.js', 'src/console/console.css', 'cordis.patch.yml']
 }
 for (const required of Object.values(requirements)) required.push('assets/market-icon.png', 'screenshots.json', 'docs/INSTALL_V1_2.md')
 if (pkg.license === 'MIT') requirements[pkg.name]?.push('LICENSE')
-const expectedId = pkg.name === '@amadeus/memory' ? 'dsh-mneme' : pkg.name.replace('@amadeus/', 'amadeus-')
+const expectedId = pkg.name === '@fg-lab/amadeus-memory' ? 'dsh-mneme' : pkg.name.replace('@fg-lab/', '')
 const errors = []
 const warnings = []
 if (!requirements[pkg.name]) errors.push(`unexpected package name: ${pkg.name}`)

@@ -10,7 +10,7 @@
 | State | 可选，1.1.0 | QQ 无硬依赖；State 不提供 QQ 权限或独立 Persona。 |
 | Persona | 可选，0.1.0 | 通过可信 QQ Scene 映射选择表达风格；暂停交接时没有新的 QQ 消息唤醒。 |
 
-插件包名为 `@amadeus/qq`，Bundle ID 为 `amadeus-qq`。五个插件各自保留独立安装、状态和回滚路径；不共享 SQLite 文件。QQ 不创建第二个主 Agent 或人格。
+插件包名为 `@fg-lab/amadeus-qq`，Bundle ID 为 `amadeus-qq`。五个插件各自保留独立安装、状态和回滚路径；不共享 SQLite 文件。QQ 不创建第二个主 Agent 或人格。
 
 1.0 状态文件可沿用；新 Workspace 绑定会撤销旧 Session 并建立新绑定。先备份独立 QQ 状态与 DSH Profile，再按[升级说明](v1.1/UPGRADE.md)操作。
 

@@ -1,11 +1,11 @@
 # Amadeus QQ v1.2.0 安装与升级
 
-当前为内部发行候选。可从本仓库 PR 的 CI artifact 获取预构建 `amadeus-qq-1.2.0.tgz`；公开 npm、GitHub Release 与外部市场收录尚未执行。隔离测试使用官方 DSH Desktop `0.2.1-rc.3` 附带的 DSH 运行时；Desktop 图形安装仍待验收。普通用户不需要 Node、源码构建或 Codex。
+当前为内部发行候选。可从本仓库 PR 的 CI artifact 获取预构建 `fg-lab-amadeus-qq-1.2.0.tgz`；公开 npm、GitHub Release 与外部市场收录尚未执行。隔离测试使用官方 DSH Desktop `0.2.1-rc.3` 附带的 DSH 运行时；Desktop 图形安装仍待验收。普通用户不需要 Node、源码构建或 Codex。
 
 ## 首次安装
 
-1. 在 DSH Desktop 打开目标 Profile 的插件管理器，选择安装本地预构建包；发行获准后也可使用对应的 Market/GitHub 条目。
-2. 选择 `amadeus-qq-1.2.0.tgz`，确认已安装插件列表显示 `@amadeus/qq@1.2.0`，并打开其设置页。
+1. 在 DSH Desktop 打开目标 Profile 的插件管理器，选择安装本地预构建包；正式发布后也可选择 `@fg-lab/amadeus-qq@1.2.0` 的 npm 源或固定版本 GitHub Release。
+2. 选择 `fg-lab-amadeus-qq-1.2.0.tgz`，确认已安装插件列表显示 `@fg-lab/amadeus-qq@1.2.0`，并打开其设置页。
 3. 在设置中选择 Workspace、填写 Bot/Owner 与 NapCat，添加授权 Scene；未配置或未启用时不会连接或外发。
 4. 按宿主提示重载或重启，回到设置页检查健康状态。安装失败时不要修改数据目录；保留错误信息与原安装包，然后恢复备份的 Profile。
 

@@ -1,8 +1,7 @@
 {
-  "name": "@amadeus/qq",
+  "name": "@fg-lab/amadeus-qq",
   "version": "1.2.0",
   "license": "MIT",
-  "private": true,
   "description": "Amadeus QQ continuous interaction plugin for DeepSeek Harness",
   "type": "module",
   "main": "src/index.js",
@@ -64,5 +63,16 @@
   "engines": {
     "node": ">=22.13.0",
     "dsh": ">=0.2.1-rc.3 <0.3.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jeskoky-pixel/amadeus-qq.git"
+  },
+  "homepage": "https://github.com/jeskoky-pixel/amadeus-qq#readme",
+  "bugs": {
+    "url": "https://github.com/jeskoky-pixel/amadeus-qq/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

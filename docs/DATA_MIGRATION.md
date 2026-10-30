@@ -2,7 +2,7 @@
 
 ## 当前格式
 
-- 发行包：`@amadeus/qq@1.2.0`
+- 发行包：`@fg-lab/amadeus-qq@1.2.0`
 - 持久 Schema Version：JSON schemaVersion 1 (`src/storage.js`)
 - 数据范围：DSH Profile 中的 Bot/Owner/连接配置、显式绝对路径 `statePath` 中的 Scene、Session 绑定、消息和投递账本；DSH 自身 Session 日志；配置的媒体目录。
 - 本轮迁移：1.1.1 → 1.2.0 不改变状态 schema。未知 `schemaVersion` 会拒绝加载，不能把旧状态重建为空对象。
