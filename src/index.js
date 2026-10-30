@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import { createHash } from 'node:crypto'
 import { QQStore } from './storage.js'
+import { SessionProvenance } from './session-provenance.js'
 import { sceneKey } from './storage.js'
 import { QQCore } from './core.js'
 import { OneBotAdapter } from './onebot.js'
@@ -101,7 +102,7 @@ async function snapshotOutboundPlan(plan) {
   }
 }
 
-export function makeDshHost(ctx, config) {
+export function makeDshHost(ctx, config, provenance = null) {
   const controller = ctx.sessionController
   if (typeof controller?.create !== 'function' || typeof controller?.prompt !== 'function') {
     throw new Error('DSH sessionController create/prompt is required')
@@ -135,7 +136,19 @@ export function makeDshHost(ctx, config) {
       else if (grant?.mediaAllowed === true) requestedPreset = 'amadeus-qq-media'
       else if (grant?.searchAllowed === true) requestedPreset = 'amadeus-qq-search'
       const location = config.workspaceId ? { workspaceId: config.workspaceId } : { cwd: config.sessionCwd }
-      const created = await controller.create({ ...location, agentPreset: requestedPreset })
+      const reservedId = provenance?.reserve()
+      let created
+      try {
+        created = await controller.create({ ...location, agentPreset: requestedPreset,
+          ...(reservedId ? { sessionId: reservedId } : {}) })
+      } catch (error) {
+        provenance?.complete?.(reservedId)
+        throw error
+      }
+      provenance?.complete?.(reservedId, created?.sessionId)
+      if (reservedId && created?.sessionId !== reservedId) {
+        throw new Error('QQ_PROVENANCE_UNSUPPORTED: Host did not honor reserved Session ID')
+      }
       if (created?.agentPreset !== requestedPreset) {
         throw new Error('QQ_UNSAFE_PRESET: DSH did not create the requested packaged preset')
       }
@@ -232,17 +245,36 @@ export function apply(ctx, config = {}) {
   }
   if (config.enabled !== true) {
     registerAdmin(ctx)
-    ctx.provide('qq', Object.freeze({ getHealth: () => ({ enabled: false, status: 'disabled' }) }))
+    // Keep identity verification alive without starting any QQ transport.
+    let provenance
+    if (typeof config.statePath === 'string' && path.isAbsolute(config.statePath)) {
+      const release = acquireInstanceLease(config.statePath)
+      try {
+        provenance = new SessionProvenance(`${config.statePath}.provenance.json`, {
+          store: new QQStore(config.statePath),
+          sessions: () => typeof ctx.reflect?.get === 'function' ? ctx.reflect.get('sessions') : ctx.sessions,
+        })
+        ctx.effect(() => release)
+      } catch (error) { release(); throw error }
+    }
+    ctx.provide('qq', Object.freeze({
+    sessionProvenanceVersion: 1,
+    sessionCreationDisabled: true,
+    classifySession: id => provenance?.classify(id) ?? ({ kind: 'unknown', reason: 'qq-unconfigured' }), getHealth: () => ({ enabled: false, status: 'disabled' }) }))
     return
   }
   if (typeof config.statePath !== 'string' || !path.isAbsolute(config.statePath)) {
     throw new Error('QQ statePath must be explicitly configured as an absolute isolated path')
   }
-  const dsh = makeDshHost(ctx, config)
   const releaseLease = acquireInstanceLease(config.statePath)
   try {
   ctx.effect(() => releaseLease)
   const store = new QQStore(config.statePath)
+  const provenance = new SessionProvenance(`${config.statePath}.provenance.json`, {
+    store,
+    sessions: () => typeof ctx.reflect?.get === 'function' ? ctx.reflect.get('sessions') : ctx.sessions,
+  })
+  const dsh = makeDshHost(ctx, config, provenance)
   const transport = new OneBotAdapter({
     enabled: config.connect === true,
     httpUrl: config.httpUrl,
@@ -810,6 +842,8 @@ export function apply(ctx, config = {}) {
   }
 
   ctx.provide('qq', Object.freeze({
+    sessionProvenanceVersion: 1,
+    classifySession: sessionId => provenance.classify(sessionId),
     getHealth: () => core.health(),
     listAuthorizedScenes: () => core.listAuthorizedScenes(),
     // In-process Host contract for cooperating plugins. The Session ID must
