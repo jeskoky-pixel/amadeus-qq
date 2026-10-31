@@ -1,6 +1,6 @@
 {
   "name": "@fg-lab/amadeus-qq",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "license": "MIT",
   "description": "Amadeus QQ continuous interaction plugin for DeepSeek Harness",
   "type": "module",
