@@ -1,4 +1,4 @@
-# Amadeus Qq
+# Amadeus QQ
 
 <img src="assets/market-icon.png" width="80" alt="Amadeus qq logo">
 
@@ -10,7 +10,7 @@
 
 ## 当前发行状态
 
-目前是产品化候选。正式 npm 与 GitHub Release 发布仍需通过发布门禁并完成 npm 账户授权；这里的版本号不代表已经公开发行。
+已发布 **1.2.1**：[GitHub Release](https://github.com/jeskoky-pixel/amadeus-qq/releases/tag/v1.2.1) · [npm](https://www.npmjs.com/package/@fg-lab/amadeus-qq)。请安装固定版本；发行包校验值见 Release。后续源码修改不代表该版本安装包发生变化。
 
 ## 能帮你做什么
 
