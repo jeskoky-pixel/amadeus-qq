@@ -107,6 +107,18 @@ test('plugin starts disabled and cannot acquire an implicit production state pat
   assert.throws(() => apply(fakeHost().ctx, { enabled: true }), /statePath/)
 })
 
+test('configured disabled connector can classify new ordinary Sessions without a transport',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'qq-disabled-provenance-'));
+ const host=fakeHost(),sessions=new Map();host.services.set('sessions',{get:id=>sessions.get(id)});
+ try {
+  apply(host.ctx,{enabled:false,statePath:path.join(dir,'qq.json')});
+  await new Promise(resolve=>setTimeout(resolve,5));
+  sessions.set('ordinary',{id:'ordinary',header:{createdAt:Date.now()}});
+  assert.equal(host.services.get('qq').classifySession('ordinary').kind,'ordinary');
+  assert.equal(host.tools.size,0);
+ } finally {for(const dispose of host.effects.reverse())if(typeof dispose==='function')dispose();fs.rmSync(dir,{recursive:true,force:true});}
+});
+
 test('general coding presets cannot create persistent QQ Sessions', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amadeus-qq-preset-'))
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
