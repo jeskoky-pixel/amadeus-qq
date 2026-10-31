@@ -1,4 +1,4 @@
-# Dedicated DSH Agent preset shipped by the same @amadeus/qq package.
+# Dedicated DSH Agent preset shipped by the same @fg-lab/amadeus-qq package.
 # It declares only the QQ platform operation contract (tool boundary) and no
 # persona or character card. The guard lives with the preset, so a persisted QQ
 # Session keeps its tool boundary even when the connector is disabled or absent.
@@ -15,7 +15,7 @@
             # Mount the package root here. DSH's preset registry resolves the
             # package root reliably; a package subpath export imports under
             # plain Node but leaves this row "never started" in the registry.
-            name: '@amadeus/qq'
+            name: '@fg-lab/amadeus-qq'
             config:
               presetGuard: true
     - id: preset-amadeus-qq-search
@@ -33,7 +33,7 @@
               fetch: false
               searchTimeoutMs: 60000
           - id: qq-search-boundary
-            name: '@amadeus/qq'
+            name: '@fg-lab/amadeus-qq'
             config:
               presetGuard: true
               allowSearch: true
@@ -46,7 +46,7 @@
         order: 22
         plugins:
           - id: qq-media-boundary
-            name: '@amadeus/qq'
+            name: '@fg-lab/amadeus-qq'
             config:
               presetGuard: true
               level: 2
@@ -65,7 +65,7 @@
               fetch: false
               searchTimeoutMs: 60000
           - id: qq-media-search-boundary
-            name: '@amadeus/qq'
+            name: '@fg-lab/amadeus-qq'
             config:
               presetGuard: true
               level: 2
@@ -82,7 +82,7 @@
             # Level 4 guards the QQ tool surface. The Owner workspace tool is
             # mounted only after an operator supplies ownerWorkspaceRoot; until
             # then Settings shows it as pending and no file tool exists.
-            name: '@amadeus/qq'
+            name: '@fg-lab/amadeus-qq'
             config:
               presetGuard: true
               level: 4

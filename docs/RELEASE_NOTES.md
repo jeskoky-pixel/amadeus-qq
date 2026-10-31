@@ -1,5 +1,12 @@
 # Amadeus QQ 发行说明
 
+## 1.2.0 内部发行候选（未公开发布）
+
+- 统一 `@fg-lab/amadeus-qq@1.2.0`，保留 Bundle ID `amadeus-qq`、Scene/Session 绑定、权限配置和可靠投递数据；本轮聚焦发行包与升级兼容。
+- 预构建 Client、Bundle Manifest、市场图标和迁移说明已纳入候选包。隔离 DSH Desktop `0.2.1-rc.3` 所附 CLI 完成 1.1.1 → 1.2.0 的合成数据升级、重启和恢复演练。
+- 本仓库经所有者确认采用 MIT；本轮发行源为公开 npm 包和固定版本 GitHub Release 包；实际发布须以最终验收结果为准。
+- Desktop 图形安装、公开 Market 下载及真实 NapCat/模型联合运行仍待验收；公开发行需要单独确认。
+
 ## 1.1.1 本地交接补丁（未公开发布）
 
 - Owner Web Console 增加“QQ 接管”开关：将同一 NapCat 登录在 Amadeus QQ 与本地 AstrBot 之间手动交接。开关经 DSH 配置服务保存并在重启后恢复，Scene 和 DSH Session 绑定不因切换而重建。

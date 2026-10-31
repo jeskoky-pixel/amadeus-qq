@@ -24,7 +24,7 @@ test('built bundle parses and the settings registration is idempotent across act
   const sandbox = { window: { __ModuleLoader__: { load: entry => { loaded = entry } } }, console }
   vm.createContext(sandbox)
   vm.runInContext(source, sandbox)
-  assert.equal(loaded.id, '@amadeus/qq')
+  assert.equal(loaded.id, '@fg-lab/amadeus-qq')
 
   const React = { createElement: (...args) => args }
   const client = loaded.factory(name => {

@@ -25,7 +25,7 @@ const body = template.replace('__CLIENT_LOGIC__', logic)
 if (body.includes('__CLIENT_LOGIC__')) throw new Error('client logic placeholder was not replaced')
 
 const bundle = `window.__ModuleLoader__.load({
-  id: '@amadeus/qq',
+  id: '@fg-lab/amadeus-qq',
   factory: (require) => {
     const React = require('react');
     const h = React.createElement;

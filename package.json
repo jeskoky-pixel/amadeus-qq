@@ -1,7 +1,7 @@
 {
-  "name": "@amadeus/qq",
-  "version": "1.1.1",
-  "private": true,
+  "name": "@fg-lab/amadeus-qq",
+  "version": "1.2.0",
+  "license": "MIT",
   "description": "Amadeus QQ continuous interaction plugin for DeepSeek Harness",
   "type": "module",
   "main": "src/index.js",
@@ -21,12 +21,20 @@
     "cordis.patch.yml",
     "preset.patch.yml",
     "README.md",
+    "LICENSE",
     "docs/RELEASE_NOTES.md",
     "docs/COMPATIBILITY.md",
     "docs/V1_SCOPE.md",
     "docs/v1.1",
     "docs/screenshots",
-    "docs/verification/V1_REAL_NAPCAT_2026-10-27.md"
+    "docs/verification/V1_REAL_NAPCAT_2026-10-27.md",
+    "docs/UPGRADE_POLICY.md",
+    "docs/DATA_MIGRATION.md",
+    "docs/RELEASE_CHECKLIST.md",
+    "docs/INSTALL_V1_2.md",
+    "scripts/release-audit.mjs",
+    "screenshots.json",
+    "assets/market-icon.png"
   ],
   "dsh": {
     "manifestVersion": 1,
@@ -49,9 +57,22 @@
   },
   "scripts": {
     "build": "node scripts/build-client.mjs",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "verify:release": "node scripts/release-audit.mjs"
   },
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=22.13.0",
+    "dsh": ">=0.2.1-rc.3 <0.3.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jeskoky-pixel/amadeus-qq.git"
+  },
+  "homepage": "https://github.com/jeskoky-pixel/amadeus-qq#readme",
+  "bugs": {
+    "url": "https://github.com/jeskoky-pixel/amadeus-qq/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

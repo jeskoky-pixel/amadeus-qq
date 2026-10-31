@@ -26,7 +26,7 @@ function setMemoryDeclaration(services) {
 }
 
 test('installed package exports a persistent QQ preset guard', async () => {
-  const module = await import('@amadeus/qq/preset-guard')
+  const module = await import('@fg-lab/amadeus-qq/preset-guard')
   let guard
   module.apply({ tools: {
     guard: fn => { guard = fn },

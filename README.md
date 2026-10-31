@@ -1,10 +1,12 @@
-# Amadeus QQ 1.1.1
+# Amadeus QQ 1.2.0（发行候选）
+
+此候选版提供预构建 DSH Bundle，可从隔离的 DSH 插件管理器安装 `.tgz`。已在官方 DSH Desktop `0.2.1-rc.3` 附带的运行时验证；公开 npm 与市场收录尚未执行。安装、升级、卸载和数据保留见 [v1.2 安装说明](docs/INSTALL_V1_2.md)、[升级政策](docs/UPGRADE_POLICY.md) 与 [数据迁移](docs/DATA_MIGRATION.md)。此前 1.1.1 的验收记录保留在下文。
 
 Amadeus QQ 是独立的 DeepSeek Harness 插件，通过本机 NapCat/OneBot 连接 QQ。每个授权群聊或好友私聊使用一个持久 DSH Session；消息读取、模型工具外发、媒体、回执与权限检查均留在插件内。Memory、Life、State 是可选联动，QQ 单独安装也能处理当前对话。
 
 ## 首次使用
 
-1. 在 DSH Desktop 的插件管理器安装 `@amadeus/qq` 包。打开插件设置页，进入受 DSH Owner 鉴权保护的 Web Console。
+1. 在 DSH Desktop 的插件管理器安装 `@fg-lab/amadeus-qq` 包。打开插件设置页，进入受 DSH Owner 鉴权保护的 Web Console。
 2. 在“全局设置”选择已有 DSH Workspace，填写 Bot QQ 号、唯一 Owner QQ 号、本机 NapCat HTTP/WebSocket 地址及需要的 Access Token。Token 保存后不回显。
 3. 添加授权群号或好友 QQ 号；Owner 私聊自动加入白名单。保存并应用，按页面提示连接 NapCat。
 4. 到“会话管理”选择预设，查看每项**实际生效**的权限，保存。授权 Scene 会在所选 Workspace 中建立独立 Session；可暂停、恢复或移出白名单。
@@ -41,3 +43,7 @@ Web Console 有总览、会话管理、功能中心、账号与 QQ 空间、全�
 仅在隔离 Profile 和授权测试 QQ 场景验收。不要将生产 DSH Profile、NapCat、QQ Bridge、Memory/Life/State 数据或真实 Token 加入仓库。`npm pack` 生成本地安装包；此仓库不自动发布或部署。项目总览见 [Amadeus-dsh](https://github.com/jeskoky-pixel/Amadeus-dsh)。
 
 Persona 等可信 Host 插件可使用只读的 [已授权 Scene 发现契约](docs/PERSONA_SCENE_CONTRACT.md) 在首条消息前配置场景；QQ 白名单与发送权限仍由 QQ 插件管理。
+
+## 许可证与发行
+
+本仓库采用 [MIT 许可证](LICENSE)。v1.2 发行包已配置为公开 npm 包；GitHub Release、npm 实际发布及 DSH Market 收录状态以发行验收报告为准。

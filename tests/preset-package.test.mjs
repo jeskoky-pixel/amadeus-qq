@@ -6,8 +6,8 @@ const packageJson = JSON.parse(fs.readFileSync(new URL('../package.json', import
 const presetPatch = fs.readFileSync(new URL('../preset.patch.yml', import.meta.url), 'utf8')
 
 test('one package ships both the connector plugin and the Agent preset patch', () => {
-  assert.equal(packageJson.name, '@amadeus/qq')
-  assert.equal(packageJson.version, '1.1.1')
+  assert.equal(packageJson.name, '@fg-lab/amadeus-qq')
+  assert.equal(packageJson.version, '1.2.0')
   assert.deepEqual(packageJson.dsh.bundle.patch, ['./cordis.patch.yml', './preset.patch.yml'])
   for (const file of packageJson.dsh.bundle.patch) {
     assert.equal(fs.existsSync(new URL(`../${file.replace('./', '')}`, import.meta.url)), true, file)
@@ -26,10 +26,10 @@ test('the preset guard is exported as a package subpath and packed', () => {
 
 test('the preset mounts the package root with the guard branch, not an unloadable subpath row', () => {
   assert.match(presetPatch, /id: amadeus-qq/)
-  assert.match(presetPatch, /^\s+name: '@amadeus\/qq'$/m)
+  assert.match(presetPatch, /^\s+name: '@fg-lab\/amadeus-qq'$/m)
   assert.match(presetPatch, /presetGuard: true/)
   const active = presetPatch.split('\n').filter(line => !line.trim().startsWith('#')).join('\n')
-  assert.doesNotMatch(active, /@amadeus\/qq\/preset-guard/)
+  assert.doesNotMatch(active, /@fg-lab\/amadeus-qq\/preset-guard/)
   const basic = active.split('- id: preset-amadeus-qq-search')[0]
   assert.doesNotMatch(basic, /^\s+level: /m, 'the basic preset must retain its safe-chat default')
 })
