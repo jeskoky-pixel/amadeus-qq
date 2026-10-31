@@ -8,6 +8,7 @@ const presetPatch = fs.readFileSync(new URL('../preset.patch.yml', import.meta.u
 test('one package ships both the connector plugin and the Agent preset patch', () => {
   assert.equal(packageJson.name, '@fg-lab/amadeus-qq')
   assert.equal(packageJson.version, '1.2.1')
+  assert.ok(fs.readFileSync(new URL('../src/console/index.html', import.meta.url), 'utf8').includes(`Amadeus QQ v${packageJson.version}`))
   assert.deepEqual(packageJson.dsh.bundle.patch, ['./cordis.patch.yml', './preset.patch.yml'])
   for (const file of packageJson.dsh.bundle.patch) {
     assert.equal(fs.existsSync(new URL(`../${file.replace('./', '')}`, import.meta.url)), true, file)
