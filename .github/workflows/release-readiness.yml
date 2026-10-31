@@ -35,3 +35,14 @@ jobs:
           name: amadeus-qq-candidate
           path: ${{ runner.temp }}/*.tgz
           if-no-files-found: error
+
+  symlink-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.2'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: node scripts/symlink-security.mjs
