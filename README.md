@@ -1,4 +1,4 @@
-# Amadeus QQ 1.2.0（发行候选）
+# Amadeus QQ 1.2.1（发行候选）
 
 此候选版提供预构建 DSH Bundle，可从隔离的 DSH 插件管理器安装 `.tgz`。已在官方 DSH Desktop `0.2.1-rc.3` 附带的运行时验证；公开 npm 与市场收录尚未执行。安装、升级、卸载和数据保留见 [v1.2 安装说明](docs/INSTALL_V1_2.md)、[升级政策](docs/UPGRADE_POLICY.md) 与 [数据迁移](docs/DATA_MIGRATION.md)。此前 1.1.1 的验收记录保留在下文。
 

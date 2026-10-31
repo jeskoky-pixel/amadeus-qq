@@ -32,7 +32,7 @@ export class SessionProvenance {
     fs.renameSync(temp, this.file)
   }
   reserve() {
-    const id = randomUUID()
+    const id = `session-${randomUUID()}`
     const next = { ...this.state, reserved: [...this.state.reserved, id] }
     this.persist(next) // Must precede even the first Host create await.
     this.state = next

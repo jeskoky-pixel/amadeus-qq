@@ -13,6 +13,7 @@ test('durable reservation precedes Host creation and survives restart, rename an
  try {
   const first=new SessionProvenance(file,options)
   const id=first.reserve()
+  assert.match(id,/^session-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
   assert.ok(JSON.parse(fs.readFileSync(file,'utf8')).reserved.includes(id))
   sessions.set(id,{id,header:{createdAt:1001,agentPreset:'renamed'}})
   assert.equal(first.classify(id).kind,'qq')
