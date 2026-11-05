@@ -51,3 +51,5 @@ Back up user data before upgrading. Code, persistent user data and recovery back
 ## Ecosystem and license
 
 [Amadeus project](https://github.com/jeskoky-pixel/Amadeus-dsh) · [MIT license](LICENSE)
+
+The 2026-11-06 development increment adds conservative recovery of a persisted scene binding only when the official Host confirms its Session is missing. See [current verification](docs/FULL_CYCLE_2026-11-06.md); lookup errors and Workspace mismatches never trigger an identity rebuild.

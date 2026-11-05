@@ -937,3 +937,32 @@ test('group upload rechecks permission after preflight listing', async t => {
   assert.deepEqual(calls, ['get_group_root_files'], 'revoked Session must never upload the file')
   core.close()
 })
+
+test('a matching binding is reused only when the Host confirms it still exists', async t => {
+  const f = fixture(t)
+  const core = f.make()
+  const scene = { botId, kind: 'private', peerId: '30001' }
+  const first = await core.ingest(privateMessage('901'))
+  const creates = () => f.events.filter(event => event[0] === 'create').length
+  assert.equal(creates(), 1)
+  const createsBefore = creates()
+
+  f.dsh.sessionExists = async sessionId => sessionId === first.sessionId
+  const live = await core.ingest(privateMessage('902'))
+  assert.equal(live.sessionId, first.sessionId)
+  assert.equal(creates(), createsBefore, 'a live binding is not recreated')
+
+  f.dsh.sessionExists = async () => false
+  const recovered = await core.ingest(privateMessage('903'))
+  assert.notEqual(recovered.sessionId, first.sessionId)
+  assert.equal(core.store.getScene(scene).sessionId, recovered.sessionId)
+  assert.equal(core.store.isKnownSession(first.sessionId), true, 'the old Session stays retired')
+  assert.ok(f.events.some(event => event[0] === 'cancel' && event[1] === first.sessionId))
+  assert.equal(creates(), createsBefore + 1)
+
+  const stable = core.store.getScene(scene).sessionId
+  f.dsh.sessionExists = async () => { throw new Error('lookup unavailable') }
+  await assert.rejects(core.ingest(privateMessage('904')), /lookup unavailable/)
+  assert.equal(core.store.getScene(scene).sessionId, stable, 'unknown lookup failure never rebuilds identity')
+  core.close()
+})

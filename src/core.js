@@ -438,7 +438,20 @@ export class QQCore {
         this.store.retireSession(scene, row.sessionId)
         row = this.store.getScene(scene)
       } else {
-        return row.sessionId
+        // A matching permission/workspace fingerprint does not prove the Host
+        // still knows this Session. Only an explicit false means missing; null
+        // (older Host mock without a lookup API) keeps prior behavior, while
+        // errors propagate and never trigger an identity rebuild.
+        const exists = typeof this.dsh.sessionExists === 'function'
+          ? await this.dsh.sessionExists(row.sessionId)
+          : null
+        if (exists !== false) return row.sessionId
+        if (typeof this.dsh.cancelSceneSession !== 'function') throw new Error('QQ_SESSION_CANCEL_UNAVAILABLE')
+        const cancelled = await this.dsh.cancelSceneSession(row.sessionId)
+        if (cancelled?.accepted !== true) throw new Error('QQ_SESSION_CANCEL_FAILED')
+        this.#releaseWaiter(scene, row.sessionId)
+        this.store.retireSession(scene, row.sessionId)
+        row = this.store.getScene(scene)
       }
     }
     const revision = this.#permissionRevision(row ?? {})

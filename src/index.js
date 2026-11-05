@@ -120,6 +120,47 @@ export function makeDshHost(ctx, config, provenance = null) {
     throw new Error('QQ sessionCwd must be absolute for legacy configuration')
   }
   return {
+    async sessionExists(sessionId) {
+      if (typeof sessionId !== 'string' || !sessionId) return false
+      // Real current Hosts expose the non-activating persistence projection
+      // read. Older mocks without it remain exempt from the existence check.
+      if (typeof controller.projections !== 'function') return null
+      let observed
+      try {
+        observed = await controller.projections({ sessionId }, AbortSignal.timeout(5000))
+      } catch (error) {
+        if (error?.code === 'session/not-found' || error?.code === 'SESSION_QUERY_SESSION_NOT_FOUND') return false
+        throw error
+      }
+      if (observed === null) return false
+      if (observed === undefined || typeof observed !== 'object' || Array.isArray(observed) ||
+        (observed.kind !== 'sequenced' && observed.kind !== 'migration-required') ||
+        observed.values === undefined || observed.values === null ||
+        typeof observed.values !== 'object' || Array.isArray(observed.values)) {
+        const error = new Error('QQ_SESSION_LOOKUP_INVALID')
+        error.code = 'QQ_SESSION_LOOKUP_INVALID'
+        throw error
+      }
+      if (config.workspaceId) {
+        let registry
+        try {
+          registry = typeof ctx.reflect?.get === 'function'
+            ? ctx.reflect.get('workspaceRegistry')
+            : undefined
+        } catch {
+          registry = undefined
+        }
+        if (registry && typeof registry.list === 'function') {
+          const workspaces = await registry.list()
+          if (!Array.isArray(workspaces)) throw new Error('QQ_SESSION_LOOKUP_INVALID')
+          const workspace = workspaces.find(item => item?.id === config.workspaceId)
+          if (!workspace) throw new Error('QQ_WORKSPACE_UNAVAILABLE')
+          if (!Array.isArray(workspace.sessionIds)) throw new Error('QQ_SESSION_LOOKUP_INVALID')
+          if (!workspace.sessionIds.includes(sessionId)) throw new Error('QQ_WORKSPACE_MISMATCH')
+        }
+      }
+      return true
+    },
     async cancelSceneSession(sessionId) {
       if (typeof controller.cancel !== 'function') throw new Error('DSH Session cancellation is unavailable')
       try {
