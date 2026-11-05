@@ -7,3 +7,5 @@ Native local validation: 304 passed, 5 existing platform/Windows skips, no failu
 Changing a scene's security/media grants intentionally retires its old Session according to the existing contract; ordinary unchanged configuration must preserve the current live binding. Safe-chat hides enhanced media tools by design. Real media tests require the corresponding scoped preset/grant; they must not grant Owner identity merely because a target is authorized for testing.
 
 No merge, publication, account mutation, group administration or new platform is part of this increment. Remaining real ingress and provider-dependent checks are explicitly reported in the protected local coverage ledger.
+
+The same increment also permits a quote target backed by a delivered outbound receipt in the same Scene, including its delivery archive. Previously reply validation only searched inbound messages, incorrectly rejecting the connector's own known delivered messages. Unknown/failed deliveries, other scenes and arbitrary message IDs remain rejected. The additional business regression brings native local validation to 305 passed / 5 existing skips; build and verify:release pass.

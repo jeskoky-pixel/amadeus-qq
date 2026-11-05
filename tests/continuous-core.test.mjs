@@ -692,6 +692,49 @@ test('reply and mention must resolve inside the bound group scene', async t => {
   core.close()
 })
 
+test('reply may target an observed inbound message or a delivered own message in the same scene', async t => {
+  const f = fixture(t, { maxDeliveries: 2 })
+  const core = f.make()
+  const groupScene = { botId, kind: 'group', peerId: '20001' }
+  const otherScene = { botId, kind: 'group', peerId: '20002' }
+  const a = await core.ingest(group('101'))
+  await core.ingest(group('201', '20002'))
+
+  let fingerprintSeq = 0
+  const deliver = (scene, actionId, messageId, status = 'delivered') => {
+    const fingerprint = (++fingerprintSeq).toString(16).padStart(64, '0')
+    core.store.reserveDelivery(scene, actionId, fingerprint)
+    core.store.settleDelivery(scene, actionId, status, status === 'delivered' ? messageId : null)
+  }
+  deliver(groupScene, 'own-delivered', '70001')
+  deliver(groupScene, 'own-unknown', '70002', 'unknown')
+  deliver(groupScene, 'own-failed', '70003', 'failed')
+  deliver(otherScene, 'other-delivered', '70004')
+
+  assert.equal((await core.send(a.sessionId, { actionId: 'reply-own', segments: [
+    { type: 'reply', data: { id: '70001' } }, { type: 'text', data: { text: 'safe' } },
+  ] })).status, 'delivered')
+  for (const [id, actionId, pattern] of [
+    ['70002', 'reply-unknown', /REPLY_SCOPE/],
+    ['70003', 'reply-failed', /REPLY_SCOPE/],
+    ['70004', 'reply-other', /REPLY_SCOPE/],
+    ['79999', 'reply-unobserved', /REPLY_SCOPE/],
+  ]) {
+    await assert.rejects(core.send(a.sessionId, { actionId, segments: [
+      { type: 'reply', data: { id } }, { type: 'text', data: { text: 'unsafe' } },
+    ] }), pattern)
+  }
+
+  // A delivered entry that moved into the archive remains addressable.
+  deliver(groupScene, 'own-archive-1', '70005')
+  deliver(groupScene, 'own-archive-2', '70006')
+  assert.equal(core.store.getScene(groupScene).deliveries.some(item => item.platformMessageId === '70005'), false)
+  assert.equal((await core.send(a.sessionId, { actionId: 'reply-archive', segments: [
+    { type: 'reply', data: { id: '70005' } }, { type: 'text', data: { text: 'archived' } },
+  ] })).status, 'delivered')
+  core.close()
+})
+
 test('pending delivery saturation is diagnosed and passive chatter drops instead of blocking', async t => {
   const f = fixture(t, { maxMessages: 2 })
   f.dsh.prompt = async () => { throw new Error('DSH disconnected') }

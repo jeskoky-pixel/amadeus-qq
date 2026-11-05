@@ -635,8 +635,10 @@ export class QQCore {
     const segments = validateOutgoingSegments(args.segments)
     for (const segment of segments) {
       if (segment.type === 'reply') {
-        const target = this.store.getScene(row).messages.find(item => item.messageId === segment.data.id)
-        if (!target) throw new Error('QQ_REPLY_SCOPE: reply target is not in this scene')
+        const target = this.store.getScene(row).messages.some(item => item.messageId === segment.data.id)
+        if (!target && !this.store.hasDelivered(row, segment.data.id)) {
+          throw new Error('QQ_REPLY_SCOPE: reply target is not in this scene')
+        }
       }
       if (segment.type === 'at') {
         if (row.kind !== 'group' || !this.store.getScene(row).messages.some(item => item.senderId === segment.data.qq)) {
