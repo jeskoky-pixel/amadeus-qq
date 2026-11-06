@@ -49,6 +49,10 @@ export const OWNER_NATIVE_TOOLS = Object.freeze([
  */
 export const MEMORY_READ_TOOLS = Object.freeze(['memory_search', 'memory_list', 'memory_get'])
 const MEMORY_READ_TOOL_SET = new Set(MEMORY_READ_TOOLS)
+// Session-bound Life views are safe to expose by name; the connector applies
+// the explicit Scene capability at execution time.
+export const LIFE_READ_TOOLS = Object.freeze(['life_shared_read', 'life_health'])
+const LIFE_READ_TOOL_SET = new Set(LIFE_READ_TOOLS)
 
 /**
  * Cordis service contract for the trusted-Scene read capability.
@@ -211,7 +215,7 @@ export function apply(ctx, config = {}) {
   // policy only when the trusted-Scene contract is present.
   const OPTIONAL_TOOLS = new Set([
     'qq_send_media', 'qq_upload_file', 'qq_qzone', 'qq_account_profile', OWNER_WORKSPACE_TOOL,
-    ...MEMORY_READ_TOOLS,
+    ...MEMORY_READ_TOOLS, ...LIFE_READ_TOOLS,
   ])
   const OWNER_NATIVE = new Set(OWNER_NATIVE_TOOLS)
   // Host plugins can register tools after this preset starts. Keep the QQ
@@ -403,6 +407,11 @@ export function apply(ctx, config = {}) {
         ? undefined
         : 'QQ Memory trusted Scene ACL read contract is unavailable'
     }
+    if (LIFE_READ_TOOL_SET.has(tool)) {
+      return authorizeCapability(exec, 'amadeus.life.read')
+        ? undefined
+        : 'QQ Session Life read permission denied'
+    }
     if (allowed.has(tool)) return undefined
     if (Object.hasOwn(QQ_TOOL_CONTRACT, tool)) {
       return `QQ Session permission level ${policy.level} does not allow ${tool}`
@@ -439,6 +448,7 @@ export function apply(ctx, config = {}) {
     const fresh = schemas
       .map(schema => schema?.name)
       .filter(name => typeof name === 'string' && !MEMORY_READ_TOOL_SET.has(name) &&
+        !LIFE_READ_TOOL_SET.has(name) &&
         !allowed.has(name) &&
         !(policy.level === 4 && ownerHostTool(name)) && name !== 'run_code' && !deniedVisible.has(name))
     if (fresh.length === 0) return
@@ -479,6 +489,7 @@ export function apply(ctx, config = {}) {
     const visiblePolicy = [
       ...policy.tools,
       ...(memoryReadGranted ? MEMORY_READ_TOOLS : []),
+      ...LIFE_READ_TOOLS,
       ...(policy.level === 4
         ? [OWNER_WORKSPACE_TOOL, ...[...known].filter(ownerHostTool)]
         : []),
