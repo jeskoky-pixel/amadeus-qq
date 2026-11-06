@@ -59,6 +59,9 @@ export const CAPABILITY_CATALOG = Object.freeze([
   Object.freeze({ id: 'qq.media.read', implemented: true }),
   Object.freeze({ id: 'qq.owner.workspace', implemented: true }),
   Object.freeze({ id: 'qq.owner.tools', implemented: true }),
+  // Explicitly grants only the session-scoped Life read tools. This is not an
+  // Owner tool grant and never exposes Life admin/intent mutation surfaces.
+  Object.freeze({ id: 'amadeus.life.read', implemented: true }),
   Object.freeze({ id: 'qq.reaction.write', implemented: true }),
   Object.freeze({ id: 'qq.poke', implemented: true }),
   Object.freeze({ id: 'qq.recall', implemented: true }),
@@ -77,6 +80,8 @@ export const CAPABILITY_CATALOG = Object.freeze([
   Object.freeze({ id: 'qq.qzone.publish', implemented: true }),
   Object.freeze({ id: 'dsh.shell', implemented: false }),
 ])
+export const LIFE_READ_CAPABILITY = 'amadeus.life.read'
+export const LIFE_READ_TOOLS = Object.freeze(['life_shared_read', 'life_health'])
 const KNOWN_CAPABILITIES = new Set(CAPABILITY_CATALOG.map(item => item.id))
 const DIRECTORY_CAPABILITIES = new Set(['qq.friends.read', 'qq.groups.read'])
 const QZONE_CAPABILITIES = new Set(['qq.qzone.use', 'qq.qzone.read', 'qq.qzone.publish'])
@@ -196,6 +201,14 @@ export class PermissionEngine {
         return decision(false, 'owner-tools-required')
       }
       return decision(true, 'owner-agent')
+    }
+    if (capability === LIFE_READ_CAPABILITY) {
+      // Life tools are session-scoped and read-only, but still require an
+      // explicit Scene grant so ordinary QQ chat cannot discover them by
+      // default. The Life module performs the final binding/ACL check.
+      return override === 'allow'
+        ? decision(true, 'scene-allow')
+        : decision(false, override === 'deny' ? 'scene-deny' : 'life-read-explicit')
     }
     if (capability === 'qq.owner.workspace') {
       // The file surface is never implied by owner-agent mode and is never

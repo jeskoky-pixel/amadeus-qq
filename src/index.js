@@ -28,6 +28,7 @@ import {
   memorySceneAclReadGranted,
   OWNER_NATIVE_TOOLS,
 } from './preset-guard.mjs'
+import { LIFE_READ_CAPABILITY, LIFE_READ_TOOLS } from './permissions.js'
 import { ADMIN_PREFIX, createAdminHandler } from './admin-http.js'
 import { createSetupService } from './setup.js'
 
@@ -362,6 +363,11 @@ export function apply(ctx, config = {}) {
       return core.authorizeSessionCapability(sid, 'dsh.search')
         ? undefined
         : 'QQ Session search permission is not authorized'
+    }
+    if (LIFE_READ_TOOLS.includes(exec.name)) {
+      return core.authorizeSessionCapability(sid, LIFE_READ_CAPABILITY)
+        ? undefined
+        : 'QQ Session Life read permission is not authorized'
     }
     // The Owner preset may expose tools registered later by other plugins
     // (for example Life). The connector guard must use the same live Owner

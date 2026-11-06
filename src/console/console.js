@@ -18,6 +18,7 @@ const modes = [
 ]
 const groups = [
   ['聊天与媒体', ['qq.read', 'qq.send', 'qq.media.read', 'qq.reaction.write', 'qq.poke', 'qq.recall']],
+  ['Amadeus Life', ['amadeus.life.read']],
   ['群管理', ['qq.group.essence', 'qq.group.notice', 'qq.group.card', 'qq.group.ban', 'qq.group.whole_ban', 'qq.group.kick', 'qq.group.name', 'qq.group.admin', 'qq.group.special_title']],
   ['Agent 与目录', ['dsh.search', 'qq.owner.workspace', 'qq.owner.tools', 'qq.friends.read', 'qq.groups.read']],
 ]
@@ -36,6 +37,7 @@ const labels = {
   'qq.group.name': '群名称', 'qq.group.admin': '设置群管理员', 'qq.group.special_title': '群头衔',
   'dsh.search': 'DSH 搜索', 'qq.owner.workspace': 'Owner 文件工作区',
   'qq.owner.tools': 'Owner Host 工具', 'qq.friends.read': '好友目录', 'qq.groups.read': '群目录',
+  'amadeus.life.read': '读取本会话 Life 概况',
   'qq.profile.write': '账号资料修改', 'qq.qzone.use': 'QQ 空间统一操作',
   'qq.qzone.read': 'QQ 空间读取', 'qq.qzone.publish': 'QQ 空间发布',
 }

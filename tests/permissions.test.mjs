@@ -92,6 +92,16 @@ test('Owner native tools require verified owner private owner-agent mode', () =>
   assert.equal(engine.evaluate(ownerPrivate, { mode: 'owner-agent', overrides: { [capability]: 'deny' } }, capability).allowed, false)
 })
 
+test('Life read is a narrow explicit Scene grant and never inherited by Safe Chat', () => {
+  const engine = new PermissionEngine()
+  const capability = 'amadeus.life.read'
+  assert.equal(CAPABILITY_CATALOG.find(item => item.id === capability)?.implemented, true)
+  assert.equal(engine.evaluate(ownerPrivate, { mode: 'safe-chat' }, capability).allowed, false)
+  assert.equal(engine.evaluate(ownerPrivate, { mode: 'safe-chat', overrides: { [capability]: 'allow' } }, capability).allowed, true)
+  assert.equal(engine.evaluate(groupA, { mode: 'safe-chat', overrides: { [capability]: 'allow' } }, capability).allowed, true)
+  assert.equal(engine.evaluate(ownerPrivate, { mode: 'safe-chat', overrides: { [capability]: 'deny' } }, capability).allowed, false)
+})
+
 test('account profile writes require verified Owner private explicit authorization', () => {
   const engine = new PermissionEngine({ ownerPrivateIds: ['30001'] })
   const capability = 'qq.profile.write'
