@@ -39,8 +39,8 @@ function fixture(t) {
   const core = new QQCore({ store, dsh: {}, transport,
     policy: { botIds: ['10001'], groupIds: ['20001'], privateIds: ['30001'] } })
   t.after(() => core.close())
-  const read = (sessionId = 'group-session', messageId = '701', index = 0) =>
-    readMessageImage({ core, store, transport, attachments, mediaRoot, sessionId, messageId, index })
+  const read = (sessionId = 'group-session', messageId = '701', index = 0, root = mediaRoot) =>
+    readMessageImage({ core, store, transport, attachments, mediaRoot: root, sessionId, messageId, index })
   return { dir, mediaRoot, imagePath, group, store, core, transport, calls, saved, read }
 }
 
@@ -76,6 +76,13 @@ test('get_image is response-bounded and accepts canonical inline image bytes', a
     await assert.rejects(read(), /QQ_MEDIA_(INLINE|LOCAL_FILE)_/)
   }
   assert.equal(saved.length, 1)
+})
+
+test('inline image bytes do not require a local media root', async t => {
+  const { read, transport } = fixture(t)
+  transport.action = async () => ({ base64: PNG.toString('base64') })
+  const result = await read('group-session', '701', 0, '')
+  assert.equal(result.attachment.attachmentId, 'sha256:qa-image')
 })
 
 test('unbound message, wrong Scene and safe-chat never request the platform image', async t => {

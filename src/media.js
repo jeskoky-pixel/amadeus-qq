@@ -179,8 +179,6 @@ export async function readMessageImage({
   }
   assertMediaRead(core, sessionId)
 
-  const root = resolveMediaRoot(mediaRoot)
-
   let id
   try {
     id = normalizeMessageId(messageId, 'messageId')
@@ -219,6 +217,10 @@ export async function readMessageImage({
 
   let data
   if (typeof response.file === 'string') {
+    // Local OneBot results are accepted only below the explicitly configured
+    // media root. Inline bytes do not need filesystem access and remain usable
+    // when NapCat returns them without a local cache path.
+    const root = resolveMediaRoot(mediaRoot)
     const localFile = resolveLocalImage(response.file, root, mediaRoot)
     data = await withTimeout(readBoundedImage(localFile), READ_TIMEOUT_MS, 'QQ_MEDIA_TIMEOUT')
   } else if (typeof response.base64 === 'string') {

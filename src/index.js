@@ -307,6 +307,11 @@ export function apply(ctx, config = {}) {
   if (typeof config.statePath !== 'string' || !path.isAbsolute(config.statePath)) {
     throw new Error('QQ statePath must be explicitly configured as an absolute isolated path')
   }
+  // Create the isolated inbound-media root on first run. media.js still
+  // enforces containment and file-type/size checks for every local result.
+  if (typeof config.mediaRoot === 'string' && path.isAbsolute(config.mediaRoot)) {
+    fs.mkdirSync(config.mediaRoot, { recursive: true })
+  }
   const releaseLease = acquireInstanceLease(config.statePath)
   try {
   ctx.effect(() => releaseLease)
