@@ -9,7 +9,6 @@ export const Config = z.object({
   setupRevision: z.natural().default(0),
   statePath: z.string().default(''),
   mediaRoot: z.string().default(''),
-  providerCacheRoot: z.string().default(''),
   sendRoot: z.string().default(''),
   qzoneEnabled: z.boolean().default(false),
   qzoneLoopbackUrl: z.string().default(''),
@@ -40,6 +39,7 @@ export const Config = z.object({
     groupDefaultMode: z.string().default('safe-chat'),
     privateDefaultMode: z.string().default('safe-chat'),
     ownerPrivateIds: z.array(z.string()).default([]),
+    lifeReadPrivateIds: z.array(z.string()).default([]),
     ownerTools: z.array(z.string()).default([]),
     globalDeny: z.array(z.string()).default([]),
     accountGrants: z.object({
