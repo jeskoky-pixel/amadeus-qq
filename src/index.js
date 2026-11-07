@@ -174,6 +174,10 @@ export function makeDshHost(ctx, config, provenance = null) {
     async createSceneSession(_scene, grant) {
       let requestedPreset = config.agentPreset
       if (grant?.ownerAgent === true) requestedPreset = 'amadeus-qq-owner'
+      else if (grant?.lifeAllowed === true && grant?.mediaAllowed === true && grant?.searchAllowed === true) requestedPreset = 'amadeus-qq-life-media-search'
+      else if (grant?.lifeAllowed === true && grant?.mediaAllowed === true) requestedPreset = 'amadeus-qq-life-media'
+      else if (grant?.lifeAllowed === true && grant?.searchAllowed === true) requestedPreset = 'amadeus-qq-life-search'
+      else if (grant?.lifeAllowed === true) requestedPreset = 'amadeus-qq-life'
       else if (grant?.mediaAllowed === true && grant?.searchAllowed === true) requestedPreset = 'amadeus-qq-media-search'
       else if (grant?.mediaAllowed === true) requestedPreset = 'amadeus-qq-media'
       else if (grant?.searchAllowed === true) requestedPreset = 'amadeus-qq-search'
@@ -283,6 +287,7 @@ export function apply(ctx, config = {}) {
     return applyPresetGuard(ctx, {
       level: config.level ?? 1,
       allowSearch: config.allowSearch === true,
+        allowLifeRead: config.allowLifeRead === true,
     })
   }
   if (config.enabled !== true) {
@@ -357,19 +362,27 @@ export function apply(ctx, config = {}) {
       execute,
     })
   }
+  const requireLifeSession = exec => {
+    const sid = sessionIdOf(exec)
+    core.authorizedScene(sid)
+    if (!core.authorizeSessionCapability(sid, LIFE_READ_CAPABILITY)) {
+      throw new Error('QQ_PERMISSION_DENIED: amadeus.life.read')
+    }
+    return sid
+  }
   registerLifeBridge(lifeSharedTool,
     'Read the bound Session Life shared view. Requires the explicit QQ Life read grant.',
     (_args, exec) => {
       const service = lifeService()
       if (!service || typeof service.getSharedLifeView !== 'function') throw new Error('QQ_LIFE_UNAVAILABLE')
-      return service.getSharedLifeView({ targetSessionId: sessionIdOf(exec) })
+      return service.getSharedLifeView({ targetSessionId: requireLifeSession(exec) })
     })
   registerLifeBridge(lifeHealthTool,
     'Read bounded Life health for the bound Session. Requires the explicit QQ Life read grant.',
     (_args, exec) => {
       const service = lifeService()
       if (!service || typeof service.getScopedHealth !== 'function') throw new Error('QQ_LIFE_UNAVAILABLE')
-      return service.getScopedHealth({ scope: `session:${sessionIdOf(exec)}` })
+      return service.getScopedHealth({ scope: `session:${requireLifeSession(exec)}` })
     })
 
   // Native management is an optional Host capability. Without a web server or
@@ -781,6 +794,7 @@ export function apply(ctx, config = {}) {
             transport,
             attachments: resolveImageAttachments(),
             mediaRoot: config.mediaRoot,
+            providerCacheRoot: config.providerCacheRoot,
             sessionId: sessionIdOf(exec),
             messageId: args.messageId,
             index: args.index ?? 0,
