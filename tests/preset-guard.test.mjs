@@ -7,6 +7,7 @@ import {
   MEMORY_SCENE_ACL_CONTRACT,
   MEMORY_SCENE_ACL_SERVICE,
   MEMORY_SCENE_ACL_VERSION,
+  LIFE_READ_TOOLS,
   QQ_PERMISSION_LEVELS,
   QQ_TOOL_CONTRACT,
   QQ_TOOL_NAMES,
@@ -338,6 +339,27 @@ test('search-enabled ordinary QQ presets also expose the three Memory readers wi
   for (const name of MEMORY_READ_TOOLS) assert.ok(allow.includes(name), name)
   assert.ok(allow.includes('web_search'))
   assert.match(host.state.guards[0](exec('pwsh')), /non-QQ tools/)
+})
+
+test('Life readers are visible and executable only in an explicit Life preset', () => {
+  const names = [...QQ_TOOL_NAMES, ...LIFE_READ_TOOLS, 'pwsh']
+  const ordinary = fakeHost(names)
+  apply(ordinary.ctx, { level: 1 })
+  const ordinaryGuard = ordinary.state.guards[0]
+  const ordinaryAllow = latestAllow(ordinary.state)
+  for (const name of LIFE_READ_TOOLS) {
+    assert.match(ordinaryGuard(exec(name)), /non-QQ|Life|permission/i, name)
+    assert.equal(ordinaryAllow.includes(name), false, name)
+  }
+
+  const life = withCapabilities(fakeHost(names), new Set(['amadeus.life.read']))
+  apply(life.ctx, { level: 1, allowLifeRead: true })
+  const lifeGuard = life.state.guards[0]
+  const lifeAllow = latestAllow(life.state)
+  for (const name of LIFE_READ_TOOLS) {
+    assert.equal(lifeGuard(exec(name)), undefined, name)
+    assert.equal(lifeAllow.includes(name), true, name)
+  }
 })
 
 test('preset-row declarations cannot widen or re-scope the Memory tool set', () => {
@@ -687,3 +709,4 @@ test('registered Owner workspace appears in the level 4 visible tool mask', () =
   apply(lower.ctx, { level: 3 })
   assert.equal(lower.state.restrictions.find(filter => filter.allow)?.allow.includes(OWNER_WORKSPACE_TOOL), false)
 })
+
