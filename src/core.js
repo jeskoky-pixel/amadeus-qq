@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { normalizeId, normalizeMessageId, sceneIdentity, sceneKey } from './storage.js'
 import { normalizeOneBotMessage, sanitizeInboundSegments, validateOutgoingSegments } from './onebot.js'
-import { CAPABILITY_CATALOG, PermissionEngine, validateScenePermissions } from './permissions.js'
+import { CAPABILITY_CATALOG, LIFE_READ_CAPABILITY, PermissionEngine, validateScenePermissions } from './permissions.js'
 
 const DEFAULT_WAIT_MS = 30_000
 const MAX_WAIT_MS = 300_000
@@ -459,6 +459,7 @@ export class QQCore {
     const created = await this.dsh.createSceneSession(scene, {
       searchAllowed: this.#can(scene, 'dsh.search'),
       mediaAllowed: this.#can(scene, 'qq.media.read'),
+      lifeAllowed: this.#can(scene, LIFE_READ_CAPABILITY),
       ownerAgent: scene.kind === 'private' &&
         this.permissions.ownerPrivateIds.has(scene.peerId) &&
         this.permissions.evaluate(scene, this.store.getScenePermissions(scene), 'qq.read').mode === 'owner-agent',
@@ -905,3 +906,4 @@ export class QQCore {
     this.transport.stop?.()
   }
 }
+
