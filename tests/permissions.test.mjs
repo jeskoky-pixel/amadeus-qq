@@ -102,6 +102,16 @@ test('Life read is a narrow explicit Scene grant and never inherited by Safe Cha
   assert.equal(engine.evaluate(ownerPrivate, { mode: 'safe-chat', overrides: { [capability]: 'deny' } }, capability).allowed, false)
 })
 
+test('configured private Life read allowlist grants only the narrow read capability', () => {
+  const engine = new PermissionEngine({ lifeReadPrivateIds: ['30001'] })
+  const capability = 'amadeus.life.read'
+  assert.equal(engine.evaluate(ownerPrivate, { mode: 'safe-chat' }, capability).allowed, true)
+  assert.equal(engine.evaluate(ownerPrivate, { mode: 'safe-chat', overrides: { [capability]: 'deny' } }, capability).allowed, false)
+  assert.equal(engine.evaluate(groupA, { mode: 'safe-chat' }, capability).allowed, false)
+  assert.equal(engine.evaluate(otherPrivate, { mode: 'safe-chat' }, capability).allowed, false)
+  assert.equal(engine.evaluate(ownerPrivate, { mode: 'safe-chat' }, 'qq.owner.tools').allowed, false)
+})
+
 test('account profile writes require verified Owner private explicit authorization', () => {
   const engine = new PermissionEngine({ ownerPrivateIds: ['30001'] })
   const capability = 'qq.profile.write'
