@@ -53,6 +53,10 @@ test('a separate search preset uses the existing Host web provider and no person
     '- id: preset-amadeus-qq-owner', '- id: qq-owner-boundary',
     '- id: owner-tool-pwsh', '- id: owner-tool-fs', '- id: owner-tool-fs-search',
     '- id: owner-tool-jobs', '- id: owner-tool-web',
+    '- id: preset-amadeus-qq-life', '- id: qq-life-boundary',
+    '- id: preset-amadeus-qq-life-search', '- id: qq-life-search-boundary',
+    '- id: preset-amadeus-qq-life-media', '- id: qq-life-media-boundary',
+    '- id: preset-amadeus-qq-life-media-search', '- id: qq-life-media-web-search', '- id: qq-life-media-search-boundary',
   ])
   assert.match(active, /id: amadeus-qq-media[\s\S]*?level: 2/)
   assert.match(active, /id: amadeus-qq-media-search[\s\S]*?level: 2/)
@@ -65,3 +69,4 @@ test('a separate search preset uses the existing Host web provider and no person
   assert.doesNotMatch(active, /ownerWorkspaceRoot|ownerWorkspaceWrites|ownerWorkspaceMaxBytes/,
     'the preset must not inject a static Owner workspace root/writes')
 })
+
