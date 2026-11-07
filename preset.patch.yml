@@ -101,3 +101,66 @@
             config:
               search: true
               fetch: true
+    - id: preset-amadeus-qq-life
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: amadeus-qq-life
+        name: Amadeus QQ Life
+        description: Restricted QQ conversation with explicit Life read access
+        order: 25
+        plugins:
+          - id: qq-life-boundary
+            name: '@fg-lab/amadeus-qq'
+            config:
+              presetGuard: true
+              allowLifeRead: true
+    - id: preset-amadeus-qq-life-search
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: amadeus-qq-life-search
+        name: Amadeus QQ Life Search
+        description: Restricted QQ conversation with Life read access and Host web search
+        order: 26
+        plugins:
+          - id: qq-life-search-boundary
+            name: '@fg-lab/amadeus-qq'
+            config:
+              presetGuard: true
+              allowLifeRead: true
+              allowSearch: true
+    - id: preset-amadeus-qq-life-media
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: amadeus-qq-life-media
+        name: Amadeus QQ Life Media
+        description: Restricted QQ conversation with Life and media read access
+        order: 27
+        plugins:
+          - id: qq-life-media-boundary
+            name: '@fg-lab/amadeus-qq'
+            config:
+              presetGuard: true
+              level: 2
+              allowLifeRead: true
+    - id: preset-amadeus-qq-life-media-search
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: amadeus-qq-life-media-search
+        name: Amadeus QQ Life Media Search
+        description: Restricted QQ conversation with Life, media read access and Host web search
+        order: 28
+        plugins:
+          - id: qq-life-media-web-search
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              search: true
+              fetch: false
+              searchTimeoutMs: 60000
+          - id: qq-life-media-search-boundary
+            name: '@fg-lab/amadeus-qq'
+            config:
+              presetGuard: true
+              level: 2
+              allowLifeRead: true
+              allowSearch: true
+
