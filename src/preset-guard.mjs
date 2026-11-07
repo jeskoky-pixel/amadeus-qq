@@ -187,6 +187,8 @@ export function resolveQQPermissionPolicy(config = {}) {
   }
   const allowSearch = config.allowSearch === undefined ? false : config.allowSearch
   if (typeof allowSearch !== 'boolean') throw new TypeError('QQ preset allowSearch must be a boolean')
+  const allowLifeRead = config.allowLifeRead === undefined ? false : config.allowLifeRead
+  if (typeof allowLifeRead !== 'boolean') throw new TypeError('QQ preset allowLifeRead must be a boolean')
   const entry = QQ_PERMISSION_LEVELS[level]
   // Memory readers are intentionally not part of the static preset policy.
   // They are opened only after the live Memory service declares the trusted
@@ -195,7 +197,7 @@ export function resolveQQPermissionPolicy(config = {}) {
   const tools = allowSearch
     ? [...toolsForLevel(level), 'web_search']
     : toolsForLevel(level)
-  return Object.freeze({ level, levelId: entry.id, tools: Object.freeze(tools), allowSearch })
+  return Object.freeze({ level, levelId: entry.id, tools: Object.freeze(tools), allowSearch, allowLifeRead })
 }
 
 /**
@@ -489,7 +491,7 @@ export function apply(ctx, config = {}) {
     const visiblePolicy = [
       ...policy.tools,
       ...(memoryReadGranted ? MEMORY_READ_TOOLS : []),
-      ...LIFE_READ_TOOLS,
+      ...(policy.allowLifeRead ? LIFE_READ_TOOLS : []),
       ...(policy.level === 4
         ? [OWNER_WORKSPACE_TOOL, ...[...known].filter(ownerHostTool)]
         : []),
@@ -588,3 +590,4 @@ export function apply(ctx, config = {}) {
     }))
   }
 }
+
