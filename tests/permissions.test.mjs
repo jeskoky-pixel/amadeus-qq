@@ -212,3 +212,4 @@ test('Scene permission changes persist independently and advance a revision', t 
   assert.throws(() => reopened.setScenePermissions(groupB, { mode: 'owner-agent', overrides: { 'qq.send': 'yes' } }))
   assert.equal(fs.readFileSync(file, 'utf8'), before)
 })
+

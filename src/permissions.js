@@ -261,3 +261,4 @@ export class PermissionEngine {
     return decision(MODE_TO_CAPABILITIES[mode].includes(capability), 'mode')
   }
 }
+

@@ -15,5 +15,8 @@
 - 定向图片与 Host 边界测试：27 通过、1 个 Windows 符号链接权限跳过、0 失败。
 - 回归覆盖：声明的 provider cache 在 mediaRoot 外可读、未声明 provider 根被拒绝、provider 根外路径被拒绝、canonical 内联 PNG 可保存为 Host attachment。
 - 现有生产 `mediaRoot`：`C:\Users\Jesko\.dsh\profiles\desktop\data\amadeus-qq\media`；修复部署前已创建该目录。
-- 真实 TIM 入站复测仍待当前包重新安装并确认 NapCat provider 根。此前旧包得到 `QQ_MEDIA_ROOT_INVALID` 和 `QQ_MEDIA_PATH_OUTSIDE_ROOT`，这些结果没有被当作通过。
+- 旧安装目录实际仍加载了未包含 provider-cache 回退的 QQ 包，因此真实图片请求报 `QQ_MEDIA_PATH_OUTSIDE_ROOT`。工作树修复已重新打包并安装到主 DSH。
+- 当前包 SHA-256：`E383FE0DEAFA4445A6F6CF1092F03A826BE10F143643A288FA5836C5B152B3A8`；安装目录 `src/media.js` SHA-256：`279FBF61C9FB41A45A2ED597DBA00A78ED2A961645318E2C284F353757674F9C`，与工作树一致。
+- 新 TIM 图片事件 `messageId=2009581422` 的原始 OneBot 句柄为 `565D42CED7DA9903A72A4E50388AF672.jpg`。NapCat `get_image(file=该句柄)` 返回可信 provider cache 路径 `...\\Pic\\2026-11\\Ori\\565d42ced7da9903a72a4e50388af672.jpg`，文件大小 `263144` 字节、JPEG 签名有效。使用当前包的真实 OneBot transport 和主 QQ state 回读，已成功生成 Host attachment `sha256:test-real`。
+- 这条图片在旧包运行期间进入，随后 DSH 才重启并换成新 Session，因此没有形成新的模型回合。当前 DSH 已监听 `127.0.0.1:3081`，要取得“图片进入实际 Provider 请求并由模型回答”的证据，需要在重启后的连接窗口再发送一条新图片。
 
