@@ -29,6 +29,7 @@
     "docs/screenshots",
     "docs/verification/V1_REAL_NAPCAT_2026-10-27.md",
     "docs/verification/IMAGE_READ_FIX_2026-11-07.md",
+    "docs/verification/LIFE_QQ_BOUNDARY_2026-11-07.md",
     "docs/UPGRADE_POLICY.md",
     "docs/DATA_MIGRATION.md",
     "docs/RELEASE_CHECKLIST.md",
@@ -90,3 +91,4 @@
     "@deepseek-ai/schemastery": "^3.18.1"
   }
 }
+
