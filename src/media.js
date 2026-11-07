@@ -44,6 +44,19 @@ function resolveMediaRoot(mediaRoot) {
   return root
 }
 
+function resolveProviderRoot(providerCacheRoot) {
+  if (typeof providerCacheRoot !== 'string' || !path.isAbsolute(providerCacheRoot)) {
+    throw mediaError('QQ_MEDIA_PROVIDER_ROOT_INVALID')
+  }
+  try {
+    const root = fs.realpathSync(providerCacheRoot)
+    if (!fs.statSync(root).isDirectory()) throw new Error('not a directory')
+    return root
+  } catch {
+    throw mediaError('QQ_MEDIA_PROVIDER_ROOT_INVALID')
+  }
+}
+
 function resolveLocalImage(file, root, mediaRoot) {
   if (typeof file !== 'string' || file.length === 0 || file.includes('\u0000')) throw mediaError('QQ_MEDIA_PATH_INVALID')
   // Reject UNC paths and URI schemes. A Windows drive path is the only
@@ -89,6 +102,40 @@ function resolveLocalImage(file, root, mediaRoot) {
     }
   }
   return real
+}
+
+// NapCat may return a canonical cache path outside the plugin's private media
+// directory. The model never supplies this path: it is obtained only from the
+// bound message handle and the OneBot get_image response. Keep the same strict
+// file, symlink, size and signature checks while accepting that provider cache.
+function resolvePlatformImage(file, providerRoot) {
+  if (typeof file !== 'string' || file.length === 0 || file.includes('\u0000')) throw mediaError('QQ_MEDIA_PATH_INVALID')
+  if (/^[\\/]{2}/.test(file)) throw mediaError('QQ_MEDIA_PATH_INVALID')
+  if (!/^[A-Za-z]:[\\/]/.test(file) && /^[A-Za-z][A-Za-z0-9+.-]*:/.test(file)) throw mediaError('QQ_MEDIA_PATH_INVALID')
+  if (!path.isAbsolute(file)) throw mediaError('QQ_MEDIA_PATH_INVALID')
+  const root = resolveProviderRoot(providerRoot)
+  let entry
+  try {
+    entry = fs.lstatSync(file)
+    if (entry.isSymbolicLink() || !entry.isFile()) throw new Error('not a regular file')
+    const real = fs.realpathSync(file)
+    const resolved = fs.lstatSync(real)
+    if (resolved.isSymbolicLink() || !resolved.isFile()) throw new Error('not a regular file')
+    const relative = path.relative(root, real)
+    if (relative === '' || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      throw mediaError('QQ_MEDIA_PATH_OUTSIDE_ROOT')
+    }
+    let cursor = root
+    for (const part of relative.split(path.sep)) {
+      cursor = path.join(cursor, part)
+      const item = fs.lstatSync(cursor)
+      if (item.isSymbolicLink()) throw mediaError('QQ_MEDIA_PATH_INVALID')
+    }
+    return real
+  } catch (error) {
+    if (error?.code === 'QQ_MEDIA_PATH_OUTSIDE_ROOT' || error?.code === 'QQ_MEDIA_PATH_INVALID') throw error
+    throw mediaError('QQ_MEDIA_PATH_INVALID')
+  }
 }
 
 function sniffImageMediaType(data) {
@@ -162,6 +209,7 @@ export async function readMessageImage({
   transport,
   attachments,
   mediaRoot,
+  providerCacheRoot,
   sessionId,
   messageId,
   index = 0,
@@ -178,8 +226,6 @@ export async function readMessageImage({
     throw permissionError('QQ_PERMISSION_DENIED')
   }
   assertMediaRead(core, sessionId)
-
-  const root = resolveMediaRoot(mediaRoot)
 
   let id
   try {
@@ -219,7 +265,23 @@ export async function readMessageImage({
 
   let data
   if (typeof response.file === 'string') {
-    const localFile = resolveLocalImage(response.file, root, mediaRoot)
+    // NapCat returns a provider-owned absolute cache path. Prefer the
+    // configured private root when it contains the file, but do not make a
+    // working OneBot provider cache depend on that optional directory: the
+    // handle came from the bound message and is still revalidated as a
+    // canonical regular file before bounded reading.
+    let localFile
+    try {
+      const root = resolveMediaRoot(mediaRoot)
+      try { localFile = resolveLocalImage(response.file, root, mediaRoot) }
+      catch (error) {
+        if (error?.code !== 'QQ_MEDIA_PATH_OUTSIDE_ROOT') throw error
+        localFile = resolvePlatformImage(response.file, providerCacheRoot)
+      }
+    } catch (error) {
+      if (error?.code !== 'QQ_MEDIA_ROOT_INVALID') throw error
+      localFile = resolvePlatformImage(response.file, providerCacheRoot)
+    }
     data = await withTimeout(readBoundedImage(localFile), READ_TIMEOUT_MS, 'QQ_MEDIA_TIMEOUT')
   } else if (typeof response.base64 === 'string') {
     data = decodeInlineImage(response.base64)
@@ -244,3 +306,4 @@ export async function readMessageImage({
   }
   return { attachment }
 }
+

@@ -92,6 +92,26 @@ test('Owner native tools require verified owner private owner-agent mode', () =>
   assert.equal(engine.evaluate(ownerPrivate, { mode: 'owner-agent', overrides: { [capability]: 'deny' } }, capability).allowed, false)
 })
 
+test('Life read is a narrow explicit Scene grant and never inherited by Safe Chat', () => {
+  const engine = new PermissionEngine()
+  const capability = 'amadeus.life.read'
+  assert.equal(CAPABILITY_CATALOG.find(item => item.id === capability)?.implemented, true)
+  assert.equal(engine.evaluate(ownerPrivate, { mode: 'safe-chat' }, capability).allowed, false)
+  assert.equal(engine.evaluate(ownerPrivate, { mode: 'safe-chat', overrides: { [capability]: 'allow' } }, capability).allowed, true)
+  assert.equal(engine.evaluate(groupA, { mode: 'safe-chat', overrides: { [capability]: 'allow' } }, capability).allowed, true)
+  assert.equal(engine.evaluate(ownerPrivate, { mode: 'safe-chat', overrides: { [capability]: 'deny' } }, capability).allowed, false)
+})
+
+test('configured private Life read allowlist grants only the narrow read capability', () => {
+  const engine = new PermissionEngine({ lifeReadPrivateIds: ['30001'] })
+  const capability = 'amadeus.life.read'
+  assert.equal(engine.evaluate(ownerPrivate, { mode: 'safe-chat' }, capability).allowed, true)
+  assert.equal(engine.evaluate(ownerPrivate, { mode: 'safe-chat', overrides: { [capability]: 'deny' } }, capability).allowed, false)
+  assert.equal(engine.evaluate(groupA, { mode: 'safe-chat' }, capability).allowed, false)
+  assert.equal(engine.evaluate(otherPrivate, { mode: 'safe-chat' }, capability).allowed, false)
+  assert.equal(engine.evaluate(ownerPrivate, { mode: 'safe-chat' }, 'qq.owner.tools').allowed, false)
+})
+
 test('account profile writes require verified Owner private explicit authorization', () => {
   const engine = new PermissionEngine({ ownerPrivateIds: ['30001'] })
   const capability = 'qq.profile.write'
@@ -202,3 +222,4 @@ test('Scene permission changes persist independently and advance a revision', t 
   assert.throws(() => reopened.setScenePermissions(groupB, { mode: 'owner-agent', overrides: { 'qq.send': 'yes' } }))
   assert.equal(fs.readFileSync(file, 'utf8'), before)
 })
+

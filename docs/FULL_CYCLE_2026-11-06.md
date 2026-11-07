@@ -1,0 +1,11 @@
+# Confirmed-missing Session recovery — 2026-11-06
+
+When a persisted QQ scene still names a Session that the official Host explicitly reports as absent, reusing the stale binding prevents normal provisioning and conversation. This change checks the non-activating persistence projection before reusing an otherwise current binding. Only an explicit null/not-found result permits the existing cancel → retire → create flow; lookup failures, malformed responses and Workspace mismatches refuse recovery. Retired provenance, message history and delivery receipts remain preserved. Existing live bindings are reused.
+
+Native local validation: 304 passed, 5 existing platform/Windows skips, no failures; build and candidate pack passed. The Creator sandbox's in-process total differs and is not used as the native local total. Real official DSH 0.2.2-rc.1 recovered the two authorized local test bindings and model qq_send_message returned real platform message IDs. Controlled Host delivery is not evidence of genuine OneBot inbound. Private scene identifiers and raw transport evidence are excluded from this repository.
+
+Changing a scene's security/media grants intentionally retires its old Session according to the existing contract; ordinary unchanged configuration must preserve the current live binding. Safe-chat hides enhanced media tools by design. Real media tests require the corresponding scoped preset/grant; they must not grant Owner identity merely because a target is authorized for testing.
+
+No merge, publication, account mutation, group administration or new platform is part of this increment. Remaining real ingress and provider-dependent checks are explicitly reported in the protected local coverage ledger.
+
+The same increment also permits a quote target backed by a delivered outbound receipt in the same Scene, including its delivery archive. Previously reply validation only searched inbound messages, incorrectly rejecting the connector's own known delivered messages. Unknown/failed deliveries, other scenes and arbitrary message IDs remain rejected. The additional business regression brings native local validation to 305 passed / 5 existing skips; build and verify:release pass.

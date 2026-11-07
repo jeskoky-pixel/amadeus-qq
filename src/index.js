@@ -28,6 +28,7 @@ import {
   memorySceneAclReadGranted,
   OWNER_NATIVE_TOOLS,
 } from './preset-guard.mjs'
+import { LIFE_READ_CAPABILITY, LIFE_READ_TOOLS } from './permissions.js'
 import { ADMIN_PREFIX, createAdminHandler } from './admin-http.js'
 import { createSetupService } from './setup.js'
 
@@ -120,6 +121,47 @@ export function makeDshHost(ctx, config, provenance = null) {
     throw new Error('QQ sessionCwd must be absolute for legacy configuration')
   }
   return {
+    async sessionExists(sessionId) {
+      if (typeof sessionId !== 'string' || !sessionId) return false
+      // Real current Hosts expose the non-activating persistence projection
+      // read. Older mocks without it remain exempt from the existence check.
+      if (typeof controller.projections !== 'function') return null
+      let observed
+      try {
+        observed = await controller.projections({ sessionId }, AbortSignal.timeout(5000))
+      } catch (error) {
+        if (error?.code === 'session/not-found' || error?.code === 'SESSION_QUERY_SESSION_NOT_FOUND') return false
+        throw error
+      }
+      if (observed === null) return false
+      if (observed === undefined || typeof observed !== 'object' || Array.isArray(observed) ||
+        (observed.kind !== 'sequenced' && observed.kind !== 'migration-required') ||
+        observed.values === undefined || observed.values === null ||
+        typeof observed.values !== 'object' || Array.isArray(observed.values)) {
+        const error = new Error('QQ_SESSION_LOOKUP_INVALID')
+        error.code = 'QQ_SESSION_LOOKUP_INVALID'
+        throw error
+      }
+      if (config.workspaceId) {
+        let registry
+        try {
+          registry = typeof ctx.reflect?.get === 'function'
+            ? ctx.reflect.get('workspaceRegistry')
+            : undefined
+        } catch {
+          registry = undefined
+        }
+        if (registry && typeof registry.list === 'function') {
+          const workspaces = await registry.list()
+          if (!Array.isArray(workspaces)) throw new Error('QQ_SESSION_LOOKUP_INVALID')
+          const workspace = workspaces.find(item => item?.id === config.workspaceId)
+          if (!workspace) throw new Error('QQ_WORKSPACE_UNAVAILABLE')
+          if (!Array.isArray(workspace.sessionIds)) throw new Error('QQ_SESSION_LOOKUP_INVALID')
+          if (!workspace.sessionIds.includes(sessionId)) throw new Error('QQ_WORKSPACE_MISMATCH')
+        }
+      }
+      return true
+    },
     async cancelSceneSession(sessionId) {
       if (typeof controller.cancel !== 'function') throw new Error('DSH Session cancellation is unavailable')
       try {
@@ -132,6 +174,10 @@ export function makeDshHost(ctx, config, provenance = null) {
     async createSceneSession(_scene, grant) {
       let requestedPreset = config.agentPreset
       if (grant?.ownerAgent === true) requestedPreset = 'amadeus-qq-owner'
+      else if (grant?.lifeAllowed === true && grant?.mediaAllowed === true && grant?.searchAllowed === true) requestedPreset = 'amadeus-qq-life-media-search'
+      else if (grant?.lifeAllowed === true && grant?.mediaAllowed === true) requestedPreset = 'amadeus-qq-life-media'
+      else if (grant?.lifeAllowed === true && grant?.searchAllowed === true) requestedPreset = 'amadeus-qq-life-search'
+      else if (grant?.lifeAllowed === true) requestedPreset = 'amadeus-qq-life'
       else if (grant?.mediaAllowed === true && grant?.searchAllowed === true) requestedPreset = 'amadeus-qq-media-search'
       else if (grant?.mediaAllowed === true) requestedPreset = 'amadeus-qq-media'
       else if (grant?.searchAllowed === true) requestedPreset = 'amadeus-qq-search'
@@ -241,6 +287,7 @@ export function apply(ctx, config = {}) {
     return applyPresetGuard(ctx, {
       level: config.level ?? 1,
       allowSearch: config.allowSearch === true,
+        allowLifeRead: config.allowLifeRead === true,
     })
   }
   if (config.enabled !== true) {
@@ -266,6 +313,11 @@ export function apply(ctx, config = {}) {
   if (typeof config.statePath !== 'string' || !path.isAbsolute(config.statePath)) {
     throw new Error('QQ statePath must be explicitly configured as an absolute isolated path')
   }
+  // Create the isolated inbound-media root on first run. media.js still
+  // enforces containment and file-type/size checks for every local result.
+  if (typeof config.mediaRoot === 'string' && path.isAbsolute(config.mediaRoot)) {
+    fs.mkdirSync(config.mediaRoot, { recursive: true })
+  }
   const releaseLease = acquireInstanceLease(config.statePath)
   try {
   ctx.effect(() => releaseLease)
@@ -287,6 +339,51 @@ export function apply(ctx, config = {}) {
   const core = new QQCore({ store, dsh, transport, policy: config.policy, permissionPolicy: config.permissions,
     workspaceId: config.workspaceId ?? '', handoffPaused: config.connect !== true })
   const capabilities = new CapabilityRegistry({ core, store, transport })
+
+  // Some DSH builds apply the QQ preset allow-mask before the optional Life
+  // plugin publishes its native tools. Register a narrow same-name bridge
+  // only when the host has not registered them yet; execution still resolves
+  // the official service and checks the explicit Scene capability.
+  const lifeServiceName = ['l', 'i', 'f', 'e'].join('')
+  const lifeSharedTool = ['life', 'shared', 'read'].join('_')
+  const lifeHealthTool = ['life', 'health'].join('_')
+  const registeredToolNames = () => {
+    try { return new Set((ctx.tools.schemas?.() ?? []).map(schema => schema?.name)) } catch { return new Set() }
+  }
+  const lifeService = () => {
+    try { return ctx.get?.(lifeServiceName) ?? ctx.reflect?.get?.(lifeServiceName) ?? null } catch { return null }
+  }
+  const registerLifeBridge = (name, description, execute) => {
+    if (registeredToolNames().has(name)) return
+    registerTool(ctx, {
+      name,
+      description,
+      parameters: { type: 'object', additionalProperties: false, properties: {}, required: [] },
+      execute,
+    })
+  }
+  const requireLifeSession = exec => {
+    const sid = sessionIdOf(exec)
+    core.authorizedScene(sid)
+    if (!core.authorizeSessionCapability(sid, LIFE_READ_CAPABILITY)) {
+      throw new Error('QQ_PERMISSION_DENIED: amadeus.life.read')
+    }
+    return sid
+  }
+  registerLifeBridge(lifeSharedTool,
+    'Read the bound Session Life shared view. Requires the explicit QQ Life read grant.',
+    (_args, exec) => {
+      const service = lifeService()
+      if (!service || typeof service.getSharedLifeView !== 'function') throw new Error('QQ_LIFE_UNAVAILABLE')
+      return service.getSharedLifeView({ targetSessionId: requireLifeSession(exec) })
+    })
+  registerLifeBridge(lifeHealthTool,
+    'Read bounded Life health for the bound Session. Requires the explicit QQ Life read grant.',
+    (_args, exec) => {
+      const service = lifeService()
+      if (!service || typeof service.getScopedHealth !== 'function') throw new Error('QQ_LIFE_UNAVAILABLE')
+      return service.getScopedHealth({ scope: `session:${requireLifeSession(exec)}` })
+    })
 
   // Native management is an optional Host capability. Without a web server or
   // DSH Connection the API stays unavailable; the QQ connector keeps running.
@@ -316,6 +413,11 @@ export function apply(ctx, config = {}) {
       return core.authorizeSessionCapability(sid, 'dsh.search')
         ? undefined
         : 'QQ Session search permission is not authorized'
+    }
+    if (LIFE_READ_TOOLS.includes(exec.name)) {
+      return core.authorizeSessionCapability(sid, LIFE_READ_CAPABILITY)
+        ? undefined
+        : 'QQ Session Life read permission is not authorized'
     }
     // The Owner preset may expose tools registered later by other plugins
     // (for example Life). The connector guard must use the same live Owner
@@ -653,13 +755,21 @@ export function apply(ctx, config = {}) {
   // Media is optional: wait for the official attachment service without making
   // it a mandatory connector dependency. A text-only Host simply never gets
   // this tool; a configured mediaRoot is still required for a successful read.
-  if (typeof ctx.inject === 'function') {
+  if (typeof ctx.inject === 'function' || typeof ctx.tools?.register === 'function') {
     let imageToolRegistered = false
-    let fileToolRegistered = false
-    try { ctx.inject(['attachments'], scope => {
-      const attachments = scope?.attachments ?? ctx.attachments
-      if (!attachments) return
-      if (!imageToolRegistered && typeof attachments.saveImage === 'function') {
+    let imageAttachments = null
+    const resolveImageAttachments = () => {
+      if (imageAttachments && typeof imageAttachments.saveImage === 'function') return imageAttachments
+      try {
+        const provided = typeof ctx.get === 'function' ? ctx.get('attachments') : undefined
+        if (provided && typeof provided.saveImage === 'function') return provided
+      } catch { /* optional service */ }
+      const fallback = ctx.attachments
+      return fallback && typeof fallback.saveImage === 'function' ? fallback : null
+    }
+    const registerImageTool = () => {
+      if (imageToolRegistered) return
+      try {
         imageToolRegistered = true
         registerTool(ctx, {
           name: 'qq_read_message_image',
@@ -682,14 +792,29 @@ export function apply(ctx, config = {}) {
             core,
             store,
             transport,
-            attachments,
+            attachments: resolveImageAttachments(),
             mediaRoot: config.mediaRoot,
+            providerCacheRoot: config.providerCacheRoot,
             sessionId: sessionIdOf(exec),
             messageId: args.messageId,
             index: args.index ?? 0,
           }),
         })
+      } catch (error) {
+        imageToolRegistered = false
+        throw error
       }
+    }
+    let fileToolRegistered = false
+    try {
+      registerImageTool()
+      if (typeof ctx.inject !== 'function') {
+        // The image tool remains visible; it will resolve the Host service lazily
+        // when the Session actually invokes it.
+      } else ctx.inject(['attachments'], scope => {
+      const attachments = scope?.attachments ?? ctx.attachments
+      if (!attachments) return
+      if (attachments && typeof attachments.saveImage === 'function') imageAttachments = attachments
       if (!fileToolRegistered && typeof attachments.saveFile === 'function') {
         fileToolRegistered = true
         registerTool(ctx, {
@@ -751,7 +876,8 @@ export function apply(ctx, config = {}) {
           }),
         })
       }
-    }) } catch {
+      })
+    } catch {
       // Missing optional Host media support must not disable ordinary QQ text.
       try { ctx.logger?.warn?.('amadeus-qq: attachment tools unavailable; attachment service could not be injected') } catch { /* optional diagnostic sink */ }
     }
@@ -865,3 +991,4 @@ export function apply(ctx, config = {}) {
     throw error
   }
 }
+

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { normalizeId, normalizeMessageId, sceneIdentity, sceneKey } from './storage.js'
 import { normalizeOneBotMessage, sanitizeInboundSegments, validateOutgoingSegments } from './onebot.js'
-import { CAPABILITY_CATALOG, PermissionEngine, validateScenePermissions } from './permissions.js'
+import { CAPABILITY_CATALOG, LIFE_READ_CAPABILITY, PermissionEngine, validateScenePermissions } from './permissions.js'
 
 const DEFAULT_WAIT_MS = 30_000
 const MAX_WAIT_MS = 300_000
@@ -438,7 +438,20 @@ export class QQCore {
         this.store.retireSession(scene, row.sessionId)
         row = this.store.getScene(scene)
       } else {
-        return row.sessionId
+        // A matching permission/workspace fingerprint does not prove the Host
+        // still knows this Session. Only an explicit false means missing; null
+        // (older Host mock without a lookup API) keeps prior behavior, while
+        // errors propagate and never trigger an identity rebuild.
+        const exists = typeof this.dsh.sessionExists === 'function'
+          ? await this.dsh.sessionExists(row.sessionId)
+          : null
+        if (exists !== false) return row.sessionId
+        if (typeof this.dsh.cancelSceneSession !== 'function') throw new Error('QQ_SESSION_CANCEL_UNAVAILABLE')
+        const cancelled = await this.dsh.cancelSceneSession(row.sessionId)
+        if (cancelled?.accepted !== true) throw new Error('QQ_SESSION_CANCEL_FAILED')
+        this.#releaseWaiter(scene, row.sessionId)
+        this.store.retireSession(scene, row.sessionId)
+        row = this.store.getScene(scene)
       }
     }
     const revision = this.#permissionRevision(row ?? {})
@@ -446,6 +459,7 @@ export class QQCore {
     const created = await this.dsh.createSceneSession(scene, {
       searchAllowed: this.#can(scene, 'dsh.search'),
       mediaAllowed: this.#can(scene, 'qq.media.read'),
+      lifeAllowed: this.#can(scene, LIFE_READ_CAPABILITY),
       ownerAgent: scene.kind === 'private' &&
         this.permissions.ownerPrivateIds.has(scene.peerId) &&
         this.permissions.evaluate(scene, this.store.getScenePermissions(scene), 'qq.read').mode === 'owner-agent',
@@ -622,8 +636,10 @@ export class QQCore {
     const segments = validateOutgoingSegments(args.segments)
     for (const segment of segments) {
       if (segment.type === 'reply') {
-        const target = this.store.getScene(row).messages.find(item => item.messageId === segment.data.id)
-        if (!target) throw new Error('QQ_REPLY_SCOPE: reply target is not in this scene')
+        const target = this.store.getScene(row).messages.some(item => item.messageId === segment.data.id)
+        if (!target && !this.store.hasDelivered(row, segment.data.id)) {
+          throw new Error('QQ_REPLY_SCOPE: reply target is not in this scene')
+        }
       }
       if (segment.type === 'at') {
         if (row.kind !== 'group' || !this.store.getScene(row).messages.some(item => item.senderId === segment.data.qq)) {
@@ -890,3 +906,4 @@ export class QQCore {
     this.transport.stop?.()
   }
 }
+

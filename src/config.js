@@ -39,6 +39,7 @@ export const Config = z.object({
     groupDefaultMode: z.string().default('safe-chat'),
     privateDefaultMode: z.string().default('safe-chat'),
     ownerPrivateIds: z.array(z.string()).default([]),
+    lifeReadPrivateIds: z.array(z.string()).default([]),
     ownerTools: z.array(z.string()).default([]),
     globalDeny: z.array(z.string()).default([]),
     accountGrants: z.object({
@@ -46,3 +47,4 @@ export const Config = z.object({
     }).default({}),
   }).default({}),
 })
+
