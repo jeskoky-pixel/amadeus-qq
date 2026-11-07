@@ -148,6 +148,7 @@ export class PermissionEngine {
       throw new TypeError('groupDefaultMode cannot be owner-agent: groups cannot be Owner Agent Scenes')
     }
     this.ownerPrivateIds = idSet(raw.ownerPrivateIds ?? [], 'ownerPrivateIds')
+    this.lifeReadPrivateIds = idSet(raw.lifeReadPrivateIds ?? [], 'lifeReadPrivateIds')
     this.ownerTools = stringSet(raw.ownerTools ?? [], 'ownerTools')
     this.globalDeny = stringSet(raw.globalDeny ?? [], 'globalDeny')
     this.accountGrants = raw.accountGrants ?? {}
@@ -205,7 +206,12 @@ export class PermissionEngine {
     if (capability === LIFE_READ_CAPABILITY) {
       // Life tools are session-scoped and read-only, but still require an
       // explicit Scene grant so ordinary QQ chat cannot discover them by
-      // default. The Life module performs the final binding/ACL check.
+      // default. A configured private allowlist is an equivalent explicit
+      // authorization for this narrow read-only capability. The Life module
+      // performs the final binding/ACL check.
+      if (scene.kind === 'private' && this.lifeReadPrivateIds.has(scene.peerId) && override !== 'deny') {
+        return decision(true, 'configured-life-read-private')
+      }
       return override === 'allow'
         ? decision(true, 'scene-allow')
         : decision(false, override === 'deny' ? 'scene-deny' : 'life-read-explicit')
