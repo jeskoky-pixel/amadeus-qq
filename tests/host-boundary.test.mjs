@@ -151,6 +151,14 @@ test('DSH host creates the packaged preset without a per-Agent restriction API',
     { sessionId: 'new-qq-session', agentPreset: 'amadeus-qq-media' })
   assert.deepEqual(await host.createSceneSession({}, { mediaAllowed: true, searchAllowed: true }),
     { sessionId: 'new-qq-session', agentPreset: 'amadeus-qq-media-search' })
+  assert.deepEqual(await host.createSceneSession({}, { lifeAllowed: true }),
+    { sessionId: 'new-qq-session', agentPreset: 'amadeus-qq-life' })
+  assert.deepEqual(await host.createSceneSession({}, { lifeAllowed: true, searchAllowed: true }),
+    { sessionId: 'new-qq-session', agentPreset: 'amadeus-qq-life-search' })
+  assert.deepEqual(await host.createSceneSession({}, { lifeAllowed: true, mediaAllowed: true }),
+    { sessionId: 'new-qq-session', agentPreset: 'amadeus-qq-life-media' })
+  assert.deepEqual(await host.createSceneSession({}, { lifeAllowed: true, mediaAllowed: true, searchAllowed: true }),
+    { sessionId: 'new-qq-session', agentPreset: 'amadeus-qq-life-media-search' })
   assert.deepEqual(await host.createSceneSession({}, { ownerAgent: true }),
     { sessionId: 'new-qq-session', agentPreset: 'amadeus-qq-owner' })
   const swapped = makeDshHost({ sessionController: {
