@@ -329,7 +329,7 @@ test('image tool takes only message identity and ordinal, never a model supplied
   for (const effect of host.effects.reverse()) effect()
 })
 
-test('missing attachment injection leaves ordinary QQ text tools available', t => {
+test('missing attachment injection leaves ordinary QQ text tools available', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amadeus-qq-no-attachments-'))
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
   const host = fakeHost()
@@ -340,7 +340,9 @@ test('missing attachment injection leaves ordinary QQ text tools available', t =
     policy: { botIds: ['10001'], privateIds: ['30001'], groupIds: [] },
   }))
   assert.ok(host.tools.has('qq_send_message'))
-  assert.equal(host.tools.has('qq_read_message_image'), false)
+  assert.equal(host.tools.has('qq_read_message_image'), true)
+  await assert.rejects(host.tools.get('qq_read_message_image').execute({ messageId: '701' },
+    { agent: { session: { id: 'unbound' } } }), /QQ_MEDIA_ATTACHMENTS_UNAVAILABLE/)
   assert.equal(host.tools.has('qq_read_message_file'), false)
   assert.equal(host.tools.has('qq_read_message_video'), false)
   for (const effect of host.effects.reverse()) effect()
@@ -365,7 +367,7 @@ test('file and video tools require saveFile and take only message identity', asy
   const videoTool = host.tools.get('qq_read_message_video')
   assert.ok(fileTool)
   assert.ok(videoTool)
-  assert.equal(host.tools.has('qq_read_message_image'), false)
+  assert.equal(host.tools.has('qq_read_message_image'), true)
   for (const tool of [fileTool, videoTool]) {
     assert.deepEqual(Object.keys(tool.parameters.properties).sort(), ['index', 'messageId'])
     const rendered = tool.output.render({}, { attachment: { attachmentId: 'sha256:test', name: 'qq-file', bytes: 1 } })
@@ -398,7 +400,7 @@ test('record transcription registers only with an explicit provider and live spe
   const audioTool = enabled.tools.get('qq_transcribe_message_record')
   assert.ok(audioTool, 'explicit local ASR provider must register the transcription tool')
   assert.deepEqual(Object.keys(audioTool.parameters.properties).sort(), ['index', 'messageId'])
-  assert.equal(enabled.tools.has('qq_read_message_image'), false)
+  assert.equal(enabled.tools.has('qq_read_message_image'), true)
   assert.ok(enabled.tools.has('qq_send_message'))
   await assert.rejects(audioTool.execute(
     { messageId: '701', providerId: 'remote-qa' },
@@ -456,3 +458,4 @@ test('connector registers the Owner workspace only with a live configured root',
   assert.equal(unset.tools.has('qq_owner_workspace'), false)
   for (const effect of unset.effects.reverse()) effect()
 })
+

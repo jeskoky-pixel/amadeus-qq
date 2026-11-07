@@ -85,6 +85,16 @@ test('inline image bytes do not require a local media root', async t => {
   assert.equal(result.attachment.attachmentId, 'sha256:qa-image')
 })
 
+test('provider cache image remains readable when the optional media root is absent', async t => {
+  const { read, transport } = fixture(t)
+  const outside = path.join(os.tmpdir(), `amadeus-provider-${Date.now()}.png`)
+  fs.writeFileSync(outside, PNG)
+  t.after(() => fs.rmSync(outside, { force: true }))
+  transport.action = async () => ({ file: outside })
+  const result = await read('group-session', '701', 0, '')
+  assert.equal(result.attachment.attachmentId, 'sha256:qa-image')
+})
+
 test('unbound message, wrong Scene and safe-chat never request the platform image', async t => {
   const { read, calls, group, store } = fixture(t)
   await assert.rejects(read('other-session'), /QQ_(MESSAGE_SCOPE|MEDIA|PERMISSION)/)
@@ -127,14 +137,14 @@ test('revoking image permission while Host admission is pending prevents image o
   await assert.rejects(pending, /QQ_PERMISSION/)
 })
 
-test('URL-only, out-of-root and oversized platform files fail without saving an attachment', async t => {
+test('URL-only and oversized platform files fail while provider cache files remain bounded', async t => {
   const { read, transport, dir, mediaRoot, saved } = fixture(t)
   transport.action = async () => ({ url: 'https://must-not-fetch.invalid/image' })
   await assert.rejects(read(), /QQ_MEDIA/)
   const outside = path.join(dir, 'outside.png')
   fs.writeFileSync(outside, PNG)
   transport.action = async () => ({ file: outside })
-  await assert.rejects(read(), /QQ_MEDIA/)
+  assert.equal((await read()).attachment.attachmentId, 'sha256:qa-image')
   for (const file of ['file:///C:/outside/picture.png', 'base64://private-image', '\\\\server\\share\\picture.png', '\\\\?\\C:\\outside\\picture.png']) {
     transport.action = async () => ({ file })
     await assert.rejects(read(), /QQ_MEDIA/)
@@ -143,7 +153,7 @@ test('URL-only, out-of-root and oversized platform files fail without saving an 
   fs.writeFileSync(huge, Buffer.alloc(5 * 1024 * 1024 + 1))
   transport.action = async () => ({ file: huge })
   await assert.rejects(read(), /QQ_MEDIA/)
-  assert.equal(saved.length, 0)
+  assert.equal(saved.length, 1)
 })
 
 test('symlink is rejected before Host attachment admission', async t => {
@@ -155,7 +165,7 @@ test('symlink is rejected before Host attachment admission', async t => {
   }
   transport.action = async () => ({ file: link })
   await assert.rejects(read(), /QQ_MEDIA/)
-  assert.equal(saved.length, 0)
+  assert.equal(saved.length, 1)
 })
 
 test('invalid image bytes are rejected before Host attachment admission', async t => {
@@ -166,3 +176,4 @@ test('invalid image bytes are rejected before Host attachment admission', async 
   await assert.rejects(read(), /QQ_MEDIA/)
   assert.equal(saved.length, 0)
 })
+

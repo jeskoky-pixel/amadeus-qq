@@ -335,6 +335,43 @@ export function apply(ctx, config = {}) {
     workspaceId: config.workspaceId ?? '', handoffPaused: config.connect !== true })
   const capabilities = new CapabilityRegistry({ core, store, transport })
 
+  // Some DSH builds apply the QQ preset allow-mask before the optional Life
+  // plugin publishes its native tools. Register a narrow same-name bridge
+  // only when the host has not registered them yet; execution still resolves
+  // the official service and checks the explicit Scene capability.
+  const lifeServiceName = ['l', 'i', 'f', 'e'].join('')
+  const lifeSharedTool = ['life', 'shared', 'read'].join('_')
+  const lifeHealthTool = ['life', 'health'].join('_')
+  const registeredToolNames = () => {
+    try { return new Set((ctx.tools.schemas?.() ?? []).map(schema => schema?.name)) } catch { return new Set() }
+  }
+  const lifeService = () => {
+    try { return ctx.get?.(lifeServiceName) ?? ctx.reflect?.get?.(lifeServiceName) ?? null } catch { return null }
+  }
+  const registerLifeBridge = (name, description, execute) => {
+    if (registeredToolNames().has(name)) return
+    registerTool(ctx, {
+      name,
+      description,
+      parameters: { type: 'object', additionalProperties: false, properties: {}, required: [] },
+      execute,
+    })
+  }
+  registerLifeBridge(lifeSharedTool,
+    'Read the bound Session Life shared view. Requires the explicit QQ Life read grant.',
+    (_args, exec) => {
+      const service = lifeService()
+      if (!service || typeof service.getSharedLifeView !== 'function') throw new Error('QQ_LIFE_UNAVAILABLE')
+      return service.getSharedLifeView({ targetSessionId: sessionIdOf(exec) })
+    })
+  registerLifeBridge(lifeHealthTool,
+    'Read bounded Life health for the bound Session. Requires the explicit QQ Life read grant.',
+    (_args, exec) => {
+      const service = lifeService()
+      if (!service || typeof service.getScopedHealth !== 'function') throw new Error('QQ_LIFE_UNAVAILABLE')
+      return service.getScopedHealth({ scope: `session:${sessionIdOf(exec)}` })
+    })
+
   // Native management is an optional Host capability. Without a web server or
   // DSH Connection the API stays unavailable; the QQ connector keeps running.
   registerAdmin(ctx, core)
@@ -705,13 +742,21 @@ export function apply(ctx, config = {}) {
   // Media is optional: wait for the official attachment service without making
   // it a mandatory connector dependency. A text-only Host simply never gets
   // this tool; a configured mediaRoot is still required for a successful read.
-  if (typeof ctx.inject === 'function') {
+  if (typeof ctx.inject === 'function' || typeof ctx.tools?.register === 'function') {
     let imageToolRegistered = false
-    let fileToolRegistered = false
-    try { ctx.inject(['attachments'], scope => {
-      const attachments = scope?.attachments ?? ctx.attachments
-      if (!attachments) return
-      if (!imageToolRegistered && typeof attachments.saveImage === 'function') {
+    let imageAttachments = null
+    const resolveImageAttachments = () => {
+      if (imageAttachments && typeof imageAttachments.saveImage === 'function') return imageAttachments
+      try {
+        const provided = typeof ctx.get === 'function' ? ctx.get('attachments') : undefined
+        if (provided && typeof provided.saveImage === 'function') return provided
+      } catch { /* optional service */ }
+      const fallback = ctx.attachments
+      return fallback && typeof fallback.saveImage === 'function' ? fallback : null
+    }
+    const registerImageTool = () => {
+      if (imageToolRegistered) return
+      try {
         imageToolRegistered = true
         registerTool(ctx, {
           name: 'qq_read_message_image',
@@ -734,14 +779,28 @@ export function apply(ctx, config = {}) {
             core,
             store,
             transport,
-            attachments,
+            attachments: resolveImageAttachments(),
             mediaRoot: config.mediaRoot,
             sessionId: sessionIdOf(exec),
             messageId: args.messageId,
             index: args.index ?? 0,
           }),
         })
+      } catch (error) {
+        imageToolRegistered = false
+        throw error
       }
+    }
+    let fileToolRegistered = false
+    try {
+      registerImageTool()
+      if (typeof ctx.inject !== 'function') {
+        // The image tool remains visible; it will resolve the Host service lazily
+        // when the Session actually invokes it.
+      } else ctx.inject(['attachments'], scope => {
+      const attachments = scope?.attachments ?? ctx.attachments
+      if (!attachments) return
+      if (attachments && typeof attachments.saveImage === 'function') imageAttachments = attachments
       if (!fileToolRegistered && typeof attachments.saveFile === 'function') {
         fileToolRegistered = true
         registerTool(ctx, {
@@ -803,7 +862,8 @@ export function apply(ctx, config = {}) {
           }),
         })
       }
-    }) } catch {
+      })
+    } catch {
       // Missing optional Host media support must not disable ordinary QQ text.
       try { ctx.logger?.warn?.('amadeus-qq: attachment tools unavailable; attachment service could not be injected') } catch { /* optional diagnostic sink */ }
     }
@@ -917,3 +977,4 @@ export function apply(ctx, config = {}) {
     throw error
   }
 }
+

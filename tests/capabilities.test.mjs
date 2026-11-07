@@ -8,7 +8,7 @@ import { QQCore } from '../src/core.js'
 import { CapabilityRegistry } from '../src/capabilities.js'
 import { NAPCAT_ACTION_NAMES } from '../src/napcat-action-names.js'
 
-function fixture(t, { permissionPolicy = {}, groupPermissions = null } = {}) {
+function fixture(t, { permissionPolicy = {}, groupPermissions = null, getLife = null } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amadeus-qq-cap-'))
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
   const store = new QQStore(path.join(dir, 'qq.json'))
@@ -31,7 +31,7 @@ function fixture(t, { permissionPolicy = {}, groupPermissions = null } = {}) {
   }, stop() {} }
   const core = new QQCore({ store, dsh: { async cancelSceneSession() { return { accepted: true } } }, transport,
     policy: { botIds: ['10001'], groupIds: ['20001'], privateIds: ['30001'] }, permissionPolicy })
-  return { registry: new CapabilityRegistry({ core, store, transport }), core, calls, transport }
+  return { registry: new CapabilityRegistry({ core, store, transport, getLife }), core, calls, transport }
 }
 
 test('installed NapCat inventory is complete as identifiers but unverified by the running backend', t => {
@@ -540,3 +540,4 @@ test('group notice reads are bounded and projected; profile writes stay unsuppor
   }
   core.close()
 })
+
